@@ -2,6 +2,8 @@
 
 A small Windows tray app that shows how much of your Claude, ChatGPT / Codex and Grok limits you've used, and whether you're on track to run out before they reset.
 
+It stands on the work of [CodexBar](https://github.com/steipete/CodexBar) and its Windows port [Win-CodexBar](https://github.com/nesszer/Win-CodexBar); see [Credits](#credits). For a Mac version, or many more services, use those.
+
 ![AI Tray popup and settings](docs/preview.png)
 
 ## What it shows
@@ -65,7 +67,14 @@ AI Tray isn't affiliated with or endorsed by Anthropic, OpenAI or xAI. It uses t
 
 ## Credits
 
-Reading ChatGPT and Grok usage is ported from [Win-CodexBar](https://github.com/nesszer/Win-CodexBar), the Windows port of [CodexBar](https://github.com/steipete/CodexBar) by Peter Steinberger. The interface uses the [Inter](https://rsms.me/inter/) typeface. Their licences are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+AI Tray wouldn't exist without [CodexBar](https://github.com/steipete/CodexBar) by Peter Steinberger and [Win-CodexBar](https://github.com/nesszer/Win-CodexBar), its Windows port.
+
+- Reading ChatGPT and Grok usage is ported from Win-CodexBar.
+- Reading Claude usage with Claude Code's login, and letting Claude Code renew that login itself, follow CodexBar's approach.
+
+What AI Tray adds is its own interface, the pace colouring, and a simpler tray app built just for these three services.
+
+The interface uses the [Inter](https://rsms.me/inter/) typeface. Licences for all of these are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Licence
 
