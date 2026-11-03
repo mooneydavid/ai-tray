@@ -55,7 +55,7 @@ Everything runs on your PC. There's no server, no account and no analytics.
 Good to know:
 
 - When a Claude or Grok login has expired, AI Tray renews it and saves the new one back to that tool's login file, so the CLI keeps working too. It won't overwrite a Claude login that Claude Code renewed in the meantime. ChatGPT logins are only read, never changed; open Codex every week or so to keep it signed in.
-- AI Tray keeps two small files in `%APPDATA%\ai-tray`: your settings, and the last numbers it fetched, so it can show them straight away after a restart.
+- AI Tray keeps a few small files in `%APPDATA%\ai-tray`: your settings, the last numbers it fetched (so it can show them straight away after a restart), and `ai-tray.log`, a short record of each refresh that's useful if you report a bug. The log never contains logins or tokens.
 - It uses the same usage endpoints the official tools use. They aren't public APIs and could change without notice.
 
 AI Tray isn't affiliated with Anthropic, OpenAI or xAI.

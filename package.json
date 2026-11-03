@@ -1,6 +1,6 @@
 {
   "name": "ai-tray",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Windows tray app showing your Claude, ChatGPT/Codex and Grok usage limits",
   "main": "main.js",
   "scripts": {
