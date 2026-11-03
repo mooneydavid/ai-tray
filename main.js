@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, Notification, powerMonitor, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, Notification, powerMonitor, screen } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -12,9 +12,12 @@ if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), '
 
 // Config stored in user data dir
 const configPath = path.join(app.getPath('userData'), 'config.json');
+// Last numbers we fetched, so a restart (or a rate limit) shows them instead of a blank card
+const cachePath = path.join(app.getPath('userData'), 'last-usage.json');
 
 const DEFAULT_CONFIG = {
   providers: { codex: true, grok: true }, // optional providers shown next to Claude
+  openAtLogin: true,                      // installed build only
 };
 
 function loadConfig() {
@@ -309,7 +312,6 @@ function launchReAuth() {
 
 let tray = null;
 let mainWindow = null;
-let settingsWindow = null;
 let lastData = null;
 let refreshInterval = null;
 let refreshInFlight = null;   // Promise of the in-progress refreshData(), if any
@@ -372,10 +374,12 @@ function createMainWindow() {
   return mainWindow;
 }
 
-function showPopup() {
+// Opens on the usage view unless asked for settings (tray menu)
+function showPopup(view = 'main') {
   createMainWindow();
   popupMoved = false;
   positionWindowNearTray();
+  mainWindow.webContents.send('show-view', { view, instant: true });
   if (lastData) mainWindow.webContents.send('data-update', lastData);
   mainWindow.show();
   mainWindow.focus();
@@ -393,39 +397,13 @@ function togglePopup() {
   showPopup();
 }
 
-function createSettingsWindow() {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.show();
-    settingsWindow.focus();
-    return;
-  }
-
-  settingsWindow = new BrowserWindow({
-    width: 420,
-    height: 262,
-    useContentSize: true,
-    resizable: false,
-    maximizable: false,
-    title: 'AI Tray Settings',
-    backgroundColor: BG,
-    titleBarStyle: 'hidden',
-    titleBarOverlay: { color: BG, symbolColor: '#b3ada3', height: 40 },
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
-
-  settingsWindow.loadFile('src/settings.html');
-  settingsWindow.on('closed', () => { settingsWindow = null; });
-}
-
 // Centre the popup above (or below) the tray icon, kept inside the screen's usable area
-function positionWindowNearTray() {
+// Size and position are set together (setBounds) so the popup never shows a half-applied resize.
+// setSize can't shrink a fixed-size window on Windows; setBounds can.
+function positionWindowNearTray(height = mainWindow && mainWindow.getBounds().height) {
   if (!mainWindow || !tray) return;
   const trayBounds = tray.getBounds();
-  const { width, height } = mainWindow.getBounds();
+  const { width } = mainWindow.getBounds();
   const area = screen.getDisplayMatching(trayBounds).workArea;
   let x = Math.round(trayBounds.x + trayBounds.width / 2 - width / 2);
   let y = trayBounds.y > area.y + area.height / 2
@@ -433,8 +411,8 @@ function positionWindowNearTray() {
     : trayBounds.y + trayBounds.height + 4;   // taskbar at the top
   x = Math.min(Math.max(x, area.x + 8), area.x + area.width - width - 8);
   y = Math.min(Math.max(y, area.y + 8), area.y + area.height - height - 8);
-  mainWindow.setPosition(x, y);
-  popupOrigin = { x, y };
+  popupOrigin = { x, y };  // before moving, so our own move isn't mistaken for a drag
+  mainWindow.setBounds({ x, y, width, height });
 }
 
 function checkUsageNotifications(lastData) {
@@ -510,7 +488,10 @@ async function doRefresh() {
   if (claudeUsage === null || claudeUsage === 'cooling') {
     // Rate limited (now or recently): keep the previous Claude data, update the rest
     if (claudeUsage === null) lastRateLimitedAt = Date.now();
-    const prevClaude = lastData?.claudeUsage || { error: 'Rate limited on startup. Will auto-refresh in a few minutes.' };
+    const prev = lastData?.claudeUsage;
+    const prevClaude = prev && !prev.error
+      ? { ...prev, staleError: 'Claude rate limited (429)', staleSince: prev.staleSince || prev.fetchedAt || now, needsLogin: false }
+      : { error: 'Claude rate limited (429)' };
     lastData = { claudeUsage: prevClaude, providers, refreshedAt: new Date().toISOString() };
   } else {
     lastRateLimitedAt = 0;  // Clear cooldown on successful response
@@ -521,10 +502,9 @@ async function doRefresh() {
   // Re-read: settings may have changed while this refresh was running
   lastData.enabledProviders = loadConfig().providers;
   checkUsageNotifications(lastData);
+  try { fs.writeFileSync(cachePath, JSON.stringify(lastData)); } catch (e) {}
 
-  for (const win of [mainWindow, settingsWindow]) {
-    if (win && !win.isDestroyed()) win.webContents.send('data-update', lastData);
-  }
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('data-update', lastData);
 
   // Update tray tooltip: one entry per provider's primary meter
   if (tray) {
@@ -556,13 +536,10 @@ const installedDir = path.join(process.env.LOCALAPPDATA || '', 'Programs');
 const isInstalledBuild = app.isPackaged
   && !process.env.PORTABLE_EXECUTABLE_FILE
   && app.getPath('exe').toLowerCase().startsWith(installedDir.toLowerCase() + path.sep);
-if (gotLock && isInstalledBuild) {
-  app.setLoginItemSettings({
-    openAtLogin: true,
-    path: app.getPath('exe'),
-  });
-  console.log('Registered login item:', app.getPath('exe'));
+function applyStartup(on) {
+  app.setLoginItemSettings({ openAtLogin: on, path: app.getPath('exe') });
 }
+if (gotLock && isInstalledBuild) applyStartup(loadConfig().openAtLogin !== false);
 
 app.whenReady().then(async () => {
   // A second instance is quitting; don't flash a duplicate tray icon on the way out
@@ -579,7 +556,7 @@ app.whenReady().then(async () => {
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Open', click: () => showPopup() },
     { label: 'Refresh', click: () => refreshData() },
-    { label: 'Settings', click: () => createSettingsWindow() },
+    { label: 'Settings', click: () => showPopup('settings') },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]);
@@ -596,9 +573,7 @@ app.whenReady().then(async () => {
     // Show or hide cards straight away, even if a refresh is skipped during a rate-limit cooldown
     if (lastData) {
       lastData.enabledProviders = config.providers;
-      for (const win of [mainWindow, settingsWindow]) {
-        if (win && !win.isDestroyed()) win.webContents.send('data-update', lastData);
-      }
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('data-update', lastData);
     }
     // A refresh already running was started with the old settings, so run one more after it
     Promise.resolve(refreshInFlight).finally(() => refreshData());
@@ -608,8 +583,15 @@ app.whenReady().then(async () => {
     lastRateLimitedAt = 0;  // Manual refresh should always bypass cooldown
     return refreshData();
   });
-  ipcMain.handle('open-settings', () => createSettingsWindow());
-  ipcMain.handle('open-external', (_, url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); });
+  ipcMain.handle('get-app-info', () => ({
+    version: app.getVersion(),
+    startupAvailable: isInstalledBuild,
+    openAtLogin: loadConfig().openAtLogin !== false,
+  }));
+  ipcMain.handle('set-startup', (_, on) => {
+    saveConfig({ ...loadConfig(), openAtLogin: !!on });
+    if (isInstalledBuild) applyStartup(!!on);
+  });
   ipcMain.handle('quit', () => app.quit());
   ipcMain.handle('close-window', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -629,11 +611,17 @@ app.whenReady().then(async () => {
   ipcMain.on('set-height', (_, height) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const h = Math.max(120, Math.min(900, Math.round(height)));
-    const [w, cur] = mainWindow.getSize();
-    if (Math.abs(cur - h) < 2) return;
-    mainWindow.setSize(w, h);
-    if (!popupMoved) positionWindowNearTray();  // if the user placed it somewhere, don't snap it back
+    const b = mainWindow.getBounds();
+    if (Math.abs(b.height - h) < 2) return;
+    if (popupMoved || !tray) mainWindow.setBounds({ ...b, height: h });  // the user placed it; don't snap it back
+    else positionWindowNearTray(h);
   });
+
+  // Start from the last numbers we saw; the first refresh replaces or marks them as old
+  try {
+    lastData = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+    lastData.enabledProviders = loadConfig().providers;
+  } catch (e) {}
 
   // Build the popup now (hidden) so the first click shows it straight away
   createMainWindow();
@@ -653,7 +641,8 @@ app.whenReady().then(async () => {
     await refreshData();
     const cu = lastData?.claudeUsage;
     const provs = Object.values(lastData?.providers || {});
-    const allFailed = (!cu || cu.error) && provs.every(p => !p || p.error);
+    const failed = (x) => !x || x.error || x.staleError;
+    const allFailed = failed(cu) && provs.every(failed);
     if (allFailed && attempt < 3) {
       const delay = 30000 * Math.pow(2, attempt);
       console.log(`All providers failed at boot, retrying in ${delay / 1000}s...`);
