@@ -1,6 +1,6 @@
 {
   "name": "ai-tray",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Windows tray app showing your Claude, ChatGPT/Codex and Grok usage limits",
   "main": "main.js",
   "scripts": {
@@ -9,10 +9,9 @@
   },
   "author": "David Mooney",
   "license": "MIT",
-  "dependencies": {},
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0"
   },
   "build": {
     "appId": "com.david.ai-tray",

@@ -10,9 +10,13 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const https = require('https');
+const { writeFileAtomic } = require('./write-file');
 
 const TOKEN_ENDPOINT = 'https://auth.x.ai/oauth2/token';
 const REFRESH_AHEAD_MS = 15 * 60 * 1000;  // refresh when <15 min of validity remains
+
+// A refresh token auth.x.ai turned down. It's never sent again; a new `grok login` replaces it.
+let rejectedRefreshToken = null;
 
 function authPath() {
   const home = (process.env.GROK_HOME || '').trim();
@@ -75,6 +79,7 @@ async function ensureFreshToken({ force = false, beforeWrite = null } = {}) {
     return { refreshed: false, expiresAt };
   }
   if (!entry.refresh_token) return { refreshed: false, expiresAt, error: 'no refresh_token' };
+  if (entry.refresh_token === rejectedRefreshToken) return { refreshed: false, expiresAt, error: 'refresh token was turned down; sign in again' };
 
   const clientId = entry.oidc_client_id || found.scope.split('::')[1];
   const issuer = (entry.oidc_issuer || 'https://auth.x.ai').replace(/\/$/, '');
@@ -91,21 +96,35 @@ async function ensureFreshToken({ force = false, beforeWrite = null } = {}) {
     return { refreshed: false, expiresAt, error: `refresh request failed: ${e.message}` };
   }
   if (res.status !== 200 || !res.body || !res.body.access_token) {
+    if (res.status === 400 || res.status === 401) rejectedRefreshToken = entry.refresh_token;
     const detail = typeof res.body === 'object' ? (res.body.error_description || res.body.error || '') : String(res.body).slice(0, 120);
     return { refreshed: false, expiresAt, error: `refresh rejected (${res.status}) ${detail}`.trim() };
   }
 
+  // Re-read before writing: if `grok login` or the Grok CLI saved a different login while our
+  // request was out, that one wins and we leave the file alone
+  let latest, current;
+  try {
+    latest = JSON.parse(fs.readFileSync(file, 'utf8'));
+    current = findOidcEntry(latest);
+  } catch (e) {}
+  if (!current || current.scope !== found.scope || current.entry.refresh_token !== entry.refresh_token) {
+    return { refreshed: false, expiresAt, error: 'Grok login changed meanwhile; left it alone' };
+  }
+
   const now = Date.now();
   const newExpiry = new Date(now + (res.body.expires_in || 6 * 3600) * 1000).toISOString();
-  entry.key = res.body.access_token;
-  if (res.body.refresh_token) entry.refresh_token = res.body.refresh_token;
-  entry.expires_at = newExpiry;
+  current.entry.key = res.body.access_token;
+  if (res.body.refresh_token) current.entry.refresh_token = res.body.refresh_token;
+  current.entry.expires_at = newExpiry;
 
   // Atomic write so a concurrent `grok` process never sees a half-written file
   if (beforeWrite) beforeWrite();
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(root, null, 2));
-  fs.renameSync(tmp, file);
+  try {
+    writeFileAtomic(file, JSON.stringify(latest, null, 2));
+  } catch (e) {
+    return { refreshed: false, expiresAt, error: `could not save the renewed login (${e.code || 'write failed'})` };
+  }
   return { refreshed: true, expiresAt: now + (res.body.expires_in || 6 * 3600) * 1000 };
 }
 

@@ -5,6 +5,7 @@ const fs = require('fs');
 const https = require('https');
 const os = require('os');
 const extras = require('./providers');  // ChatGPT / Codex and Grok
+const { writeFileAtomic } = require('./providers/write-file');
 
 // `npm start` runs get their own data folder, so a dev copy never collides with (or quits
 // in favour of) the installed app, and never touches its settings.
@@ -17,7 +18,7 @@ const cachePath = path.join(app.getPath('userData'), 'last-usage.json');
 
 // Everything written to the console also goes to ai-tray.log in the same folder (kept under
 // ~256 KB, one previous file kept as .old), so a stalled or failing refresh can be diagnosed.
-// Nothing logged here contains tokens.
+// Nothing logged here contains tokens, and the Windows user folder is shown as ~.
 const logPath = path.join(app.getPath('userData'), 'ai-tray.log');
 for (const level of ['log', 'warn', 'error']) {
   const original = console[level].bind(console);
@@ -25,9 +26,8 @@ for (const level of ['log', 'warn', 'error']) {
     original(...args);
     try {
       if (fs.existsSync(logPath) && fs.statSync(logPath).size > 256 * 1024) fs.renameSync(logPath, logPath + '.old');
-      const text = args.map(a => (a instanceof Error ? a.stack : typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
-      fs.appendFileSync(logPath, `${new Date().toISOString()} ${level.padEnd(5)} ${text}
-`);
+      const text = args.map(a => (a instanceof Error ? a.stack : typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ').split(os.homedir()).join('~');
+      fs.appendFileSync(logPath, `${new Date().toISOString()} ${level.padEnd(5)} ${text}\n`);
     } catch (e) {}
   };
 }
@@ -43,7 +43,11 @@ function loadConfig() {
   try {
     if (fs.existsSync(configPath)) {
       const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      return { ...DEFAULT_CONFIG, ...saved, providers: { ...DEFAULT_CONFIG.providers, ...(saved.providers || {}) } };
+      // Known settings only, so keys left by older versions drop out on the next save
+      return {
+        providers: { ...DEFAULT_CONFIG.providers, ...(saved.providers || {}) },
+        openAtLogin: typeof saved.openAtLogin === 'boolean' ? saved.openAtLogin : DEFAULT_CONFIG.openAtLogin,
+      };
     }
   } catch (e) {}
   return { ...DEFAULT_CONFIG, providers: { ...DEFAULT_CONFIG.providers } };
@@ -125,13 +129,12 @@ function saveClaudeTokens(filePath, usedRefreshToken, tokens) {
     }
     current.claudeAiOauth = { ...oauth, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresAt: tokens.expiresAt };
     suppressWatcherBriefly();
-    const tmp = `${filePath}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(current, null, 2));
-    fs.renameSync(tmp, filePath);
+    writeFileAtomic(filePath, JSON.stringify(current, null, 2));
   } catch (e) {
     console.error('Failed to save refreshed credentials:', e.message);
   }
 }
+
 
 // Ignore file-watcher events caused by our own credential writes
 function suppressWatcherBriefly() {
@@ -139,6 +142,9 @@ function suppressWatcherBriefly() {
   clearTimeout(suppressWatcherBriefly.timer);
   suppressWatcherBriefly.timer = setTimeout(() => { suppressWatcher = false; }, 2000);
 }
+
+// A Claude refresh token the server turned down, so we don't keep asking with it
+let rejectedClaudeRefresh = null;
 
 // Claude Code's public OAuth client ID
 const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
@@ -168,6 +174,8 @@ async function refreshTokenDirect(refreshToken) {
     }
     const reason = res.body && typeof res.body === 'object' ? (res.body.error_description || res.body.error || '') : '';
     console.error('Direct token refresh failed:', res.status, reason);
+    // Turned down (revoked, or already used): never send this one again. A new sign-in replaces it.
+    if (res.status === 400 || res.status === 401) rejectedClaudeRefresh = refreshToken;
     return null;
   } catch (e) {
     console.error('Direct token refresh error:', e.message);
@@ -175,15 +183,21 @@ async function refreshTokenDirect(refreshToken) {
   }
 }
 
+function pick(obj, keys) {
+  return Object.fromEntries(keys.filter(k => k in obj).map(k => [k, obj[k]]));
+}
+
 // Plan name for the card header, from what Claude Code saved at login ("max" + "default_claude_max_5x" -> "Max 5x")
 function claudePlan() {
   const cred = loadClaudeCredentials();
   const type = cred && cred.oauth.subscriptionType;
   if (!type) return null;
-  const tier = String(cred.oauth.rateLimitTier || '').match(/(d+x)$/);
+  const tier = String(cred.oauth.rateLimitTier || '').match(/(\d+x)$/);
   const name = type.charAt(0).toUpperCase() + type.slice(1);
   return tier && type === 'max' ? `${name} ${tier[1]}` : name;
 }
+
+const EXPIRED = Symbol('expired');  // the login has run out and can't be renewed
 
 // Get a valid OAuth token, refreshing if expired (or if `force` is set after a 401).
 // The credentials file is re-read on every call, so a login Claude Code refreshed itself
@@ -202,6 +216,8 @@ async function getClaudeOAuthToken({ force = false } = {}) {
     return token;
   }
   if (!refreshTk) return token || null;
+  // Already turned down: only a new sign-in (which writes a new refresh token) can help
+  if (refreshTk === rejectedClaudeRefresh) return expiresAt && Date.now() >= expiresAt ? EXPIRED : token || null;
 
   console.log('OAuth token expired, refreshing...');
   const refreshed = await refreshTokenDirect(refreshTk);
@@ -223,6 +239,7 @@ async function getClaudeOAuthToken({ force = false } = {}) {
 // Fetch Claude session + weekly usage via OAuth (with auto-retry on 401)
 async function fetchClaudeUsage() {
   let token = await getClaudeOAuthToken();
+  if (token === EXPIRED) return { error: 'OAuth token expired. Please re-authenticate.' };
   if (!token) return { error: 'No Claude OAuth token found. Make sure Claude Code is installed and logged in.' };
 
   const doFetch = async (t) => {
@@ -239,9 +256,10 @@ async function fetchClaudeUsage() {
     if (res.status === 401) {
       console.log('Got 401, refreshing token...');
       // If Claude Code already wrote a newer token, use that rather than refreshing again
-      const onDisk = await getClaudeOAuthToken();
+      const again = loadClaudeCredentials();
+      const onDisk = again && (again.oauth.accessToken || again.oauth.access_token);
       const fresh = onDisk && onDisk !== token ? onDisk : await getClaudeOAuthToken({ force: true });
-      if (fresh) {
+      if (fresh && fresh !== EXPIRED && fresh !== token) {
         token = fresh;
         res = await doFetch(token);
       }
@@ -260,7 +278,7 @@ async function fetchClaudeUsage() {
     return {
       session: d.five_hour ? { utilization: d.five_hour.utilization, resets_at: d.five_hour.resets_at } : null,
       weekly: d.seven_day ? { utilization: d.seven_day.utilization, resets_at: d.seven_day.resets_at } : null,
-      extraUsage: d.extra_usage || null,
+      extraUsage: d.extra_usage ? pick(d.extra_usage, ['is_enabled', 'used_credits', 'monthly_limit', 'utilization', 'currency']) : null,
       plan: claudePlan(),
     };
   } catch (e) {
@@ -345,8 +363,9 @@ let tray = null;
 let mainWindow = null;
 let lastData = null;
 let refreshInterval = null;
-let refreshInFlight = null;
-const refreshPending = new Set();  // services the current refresh is still waiting on, for the log   // Promise of the in-progress refreshData(), if any
+let refreshInFlight = null;         // Promise of the in-progress refreshData(), if any
+let refreshGeneration = 0;         // bumped per refresh, so an abandoned one can't overwrite a newer one
+const refreshPending = new Set();  // services the current refresh is still waiting on, for the log
 let suppressWatcher = false;  // Suppress watcher during our own credential writes
 let lastRateLimitedAt = 0;    // Cooldown after 429
 const CLAUDE_COOLDOWN_MS = 2 * 60 * 1000;
@@ -381,11 +400,15 @@ function createMainWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       backgroundThrottling: false,  // keep measuring height and ticking countdowns while hidden
       preload: path.join(__dirname, 'preload.js'),
     },
   });
 
+  // The popup only ever shows its own page: no navigating away (a file dropped on it, say), no new windows
+  mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.loadFile('src/popup.html');
   mainWindow.webContents.on('did-finish-load', () => {
     if (lastData) mainWindow.webContents.send('data-update', lastData);
@@ -507,12 +530,12 @@ function refreshData({ force = false } = {}) {
       resolve();
     }, REFRESH_TIMEOUT_MS);
   });
-  const run = doRefresh(force).catch((e) => console.error('Refresh failed:', e));
+  const run = doRefresh(force, ++refreshGeneration).catch((e) => console.error('Refresh failed:', e));
   refreshInFlight = Promise.race([run, timedOut]).finally(() => { clearTimeout(watchdog); refreshInFlight = null; });
   return refreshInFlight;
 }
 
-async function doRefresh(force) {
+async function doRefresh(force, generation) {
   const started = Date.now();
   const config = loadConfig();
   // During a Claude rate-limit cooldown only Claude waits; the other providers still refresh,
@@ -525,12 +548,17 @@ async function doRefresh(force) {
   for (const id of Object.keys(config.providers || {})) if (config.providers[id]) refreshPending.add(id);
   const [claudeUsage, results] = await Promise.all([
     (claudeRecent ? Promise.resolve('recent') : claudeCooling ? Promise.resolve('cooling') : fetchClaudeUsage())
-      .finally(() => refreshPending.delete('claude')),
+      .finally(() => generation === refreshGeneration && refreshPending.delete('claude')),
     extras.fetchAll(config.providers, {
       beforeCredentialWrite: suppressWatcherBriefly,
-      onDone: (id) => refreshPending.delete(id),
+      onDone: (id) => generation === refreshGeneration && refreshPending.delete(id),
     }),
   ]);
+  // Abandoned by the watchdog and a newer refresh has started since: drop these results
+  if (generation !== refreshGeneration) {
+    console.warn(`Late refresh finished after ${Date.now() - started}ms; ignoring it.`);
+    return;
+  }
   const now = new Date().toISOString();
   const providers = {};
   for (const [id, result] of Object.entries(results)) {
@@ -627,7 +655,12 @@ app.whenReady().then(async () => {
   // IPC handlers
   ipcMain.handle('get-data', () => lastData);
   ipcMain.handle('get-config', () => loadConfig());
-  ipcMain.handle('save-config', (_, config) => {
+  ipcMain.handle('save-config', (_, incoming) => {
+    // Only the switches the popup owns; everything else stays as saved
+    const config = loadConfig();
+    const sent = (incoming && incoming.providers) || {};
+    for (const id of Object.keys(extras.PROVIDERS)) if (typeof sent[id] === 'boolean') config.providers[id] = sent[id];
+    if (incoming && typeof incoming.openAtLogin === 'boolean') config.openAtLogin = incoming.openAtLogin;
     saveConfig(config);
     // Show or hide cards straight away, even if a refresh is skipped during a rate-limit cooldown
     if (lastData) {
@@ -668,7 +701,7 @@ app.whenReady().then(async () => {
   });
   // Popup reports its content height so the window fits however many cards are shown
   ipcMain.on('set-height', (_, height) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (!mainWindow || mainWindow.isDestroyed() || !Number.isFinite(height)) return;
     const h = Math.max(120, Math.min(900, Math.round(height)));
     const b = mainWindow.getBounds();
     if (Math.abs(b.height - h) < 2) return;
