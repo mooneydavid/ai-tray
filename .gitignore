@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.claude/
+.preview/
+bin/codexbar-cli.exe
+*.log

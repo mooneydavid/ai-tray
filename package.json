@@ -1,0 +1,42 @@
+{
+  "name": "ai-tray",
+  "version": "1.0.0",
+  "description": "System tray app for Claude Max and Anthropic API usage",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64"
+  },
+  "author": "David Mooney",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.david.ai-tray",
+    "productName": "AI Tray",
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "extraResources": [
+      {
+        "from": "bin/codexbar-cli.exe",
+        "to": "bin/codexbar-cli.exe"
+      }
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "providers/**",
+      "src/**",
+      "assets/**",
+      "package.json"
+    ]
+  }
+}
