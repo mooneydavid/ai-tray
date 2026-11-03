@@ -53,7 +53,7 @@ function parseCredits(json, authMode) {
     pct = (c.onDemandUsed.val || 0) / c.onDemandCap.val * 100;
   }
   const period = c.currentPeriod && c.currentPeriod.end ? c.currentPeriod : { start: c.billingPeriodStart, end: c.billingPeriodEnd };
-  if (pct === null) return { error: 'No usage data yet.' };
+  if (pct === null) return { error: 'Grok didn’t send a usage number this time.', noPercent: true };
   return {
     meters: [{
       key: 'session',
@@ -100,7 +100,15 @@ async function fetchUsage({ beforeCredentialWrite } = {}) {
     if (res.status === 401 || res.status === 403) return { error: 'Grok sign-in expired.', needsLogin: true };
     if (res.status === 429) return { error: 'Grok rate limited (429).' };
     if (!res.ok) return { error: `Grok returned ${res.status}` };
-    return parseCredits(await res.json(), login.authMode);
+    let result = parseCredits(await res.json(), login.authMode);
+    // The credits endpoint now and then answers with the billing period but no percentage; a
+    // second ask a moment later usually has it
+    if (result.noPercent) {
+      await new Promise(r => setTimeout(r, 1500));
+      const again = await requestCredits(login.token);
+      if (again.ok) result = parseCredits(await again.json(), login.authMode);
+    }
+    return result;
   } catch (e) {
     return { error: (e.cause && e.cause.code) || e.message };
   }

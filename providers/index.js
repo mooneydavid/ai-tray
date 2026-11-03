@@ -30,7 +30,9 @@ const PROVIDERS = {
 // Fetch all enabled providers in parallel
 async function fetchAll(enabled, opts = {}) {
   const ids = Object.keys(PROVIDERS).filter(id => enabled[id]);
-  const settled = await Promise.all(ids.map(id => PROVIDERS[id].fetch(opts).catch(e => ({ error: e.message }))));
+  const settled = await Promise.all(ids.map(id => PROVIDERS[id].fetch(opts)
+    .catch(e => ({ error: e.message }))
+    .finally(() => opts.onDone && opts.onDone(id))));
   const results = {};
   ids.forEach((id, i) => { results[id] = settled[i]; });
   return results;

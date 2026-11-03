@@ -15,6 +15,25 @@ const configPath = path.join(app.getPath('userData'), 'config.json');
 // Last numbers we fetched, so a restart (or a rate limit) shows them instead of a blank card
 const cachePath = path.join(app.getPath('userData'), 'last-usage.json');
 
+// Everything written to the console also goes to ai-tray.log in the same folder (kept under
+// ~256 KB, one previous file kept as .old), so a stalled or failing refresh can be diagnosed.
+// Nothing logged here contains tokens.
+const logPath = path.join(app.getPath('userData'), 'ai-tray.log');
+for (const level of ['log', 'warn', 'error']) {
+  const original = console[level].bind(console);
+  console[level] = (...args) => {
+    original(...args);
+    try {
+      if (fs.existsSync(logPath) && fs.statSync(logPath).size > 256 * 1024) fs.renameSync(logPath, logPath + '.old');
+      const text = args.map(a => (a instanceof Error ? a.stack : typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+      fs.appendFileSync(logPath, `${new Date().toISOString()} ${level.padEnd(5)} ${text}
+`);
+    } catch (e) {}
+  };
+}
+process.on('unhandledRejection', (e) => console.error('Unhandled rejection:', e));
+process.on('uncaughtException', (e) => console.error('Uncaught exception:', e));
+
 const DEFAULT_CONFIG = {
   providers: { codex: true, grok: true }, // optional providers shown next to Claude
   openAtLogin: true,                      // installed build only
@@ -147,7 +166,8 @@ async function refreshTokenDirect(refreshToken) {
         expiresAt: Date.now() + (res.body.expires_in || 28800) * 1000,
       };
     }
-    console.error('Direct token refresh failed:', res.status, res.body);
+    const reason = res.body && typeof res.body === 'object' ? (res.body.error_description || res.body.error || '') : '';
+    console.error('Direct token refresh failed:', res.status, reason);
     return null;
   } catch (e) {
     console.error('Direct token refresh error:', e.message);
@@ -325,11 +345,13 @@ let tray = null;
 let mainWindow = null;
 let lastData = null;
 let refreshInterval = null;
-let refreshInFlight = null;   // Promise of the in-progress refreshData(), if any
+let refreshInFlight = null;
+const refreshPending = new Set();  // services the current refresh is still waiting on, for the log   // Promise of the in-progress refreshData(), if any
 let suppressWatcher = false;  // Suppress watcher during our own credential writes
 let lastRateLimitedAt = 0;    // Cooldown after 429
 const CLAUDE_COOLDOWN_MS = 2 * 60 * 1000;
 const CLAUDE_REUSE_MS = 2 * 60 * 1000;
+const REFRESH_TIMEOUT_MS = 90 * 1000;
 // Track which meters have already triggered an 80% notification (reset when they drop below)
 const notifiedAt80 = {};
 
@@ -476,21 +498,37 @@ function refreshData({ force = false } = {}) {
   // Coalesce concurrent calls (watcher + polling timer + manual refresh) onto one fetch
   if (refreshInFlight) return refreshInFlight;
 
-  refreshInFlight = doRefresh(force).finally(() => { refreshInFlight = null; });
+  // A refresh that hangs (a request stuck while the network comes up after boot, say) must not
+  // block every later refresh, so give up on it after REFRESH_TIMEOUT_MS
+  let watchdog;
+  const timedOut = new Promise((resolve) => {
+    watchdog = setTimeout(() => {
+      console.error(`Refresh took over ${REFRESH_TIMEOUT_MS / 1000}s; abandoning it. Still waiting on: ${[...refreshPending].join(', ') || 'saving'}`);
+      resolve();
+    }, REFRESH_TIMEOUT_MS);
+  });
+  const run = doRefresh(force).catch((e) => console.error('Refresh failed:', e));
+  refreshInFlight = Promise.race([run, timedOut]).finally(() => { clearTimeout(watchdog); refreshInFlight = null; });
   return refreshInFlight;
 }
 
 async function doRefresh(force) {
+  const started = Date.now();
   const config = loadConfig();
   // During a Claude rate-limit cooldown only Claude waits; the other providers still refresh,
   // so a ChatGPT or Grok sign-in shows up straight away
   const claudeCooling = lastRateLimitedAt && Date.now() - lastRateLimitedAt < CLAUDE_COOLDOWN_MS;
   const prevFetched = Date.parse(lastData?.claudeUsage?.fetchedAt || '');
   const claudeRecent = !force && !lastData?.claudeUsage?.staleError && Date.now() - prevFetched < CLAUDE_REUSE_MS;
+  refreshPending.clear();
+  refreshPending.add('claude');
+  for (const id of Object.keys(config.providers || {})) if (config.providers[id]) refreshPending.add(id);
   const [claudeUsage, results] = await Promise.all([
-    claudeRecent ? 'recent' : claudeCooling ? 'cooling' : fetchClaudeUsage(),
+    (claudeRecent ? Promise.resolve('recent') : claudeCooling ? Promise.resolve('cooling') : fetchClaudeUsage())
+      .finally(() => refreshPending.delete('claude')),
     extras.fetchAll(config.providers, {
       beforeCredentialWrite: suppressWatcherBriefly,
+      onDone: (id) => refreshPending.delete(id),
     }),
   ]);
   const now = new Date().toISOString();
@@ -519,8 +557,11 @@ async function doRefresh(force) {
   }
   // Re-read: settings may have changed while this refresh was running
   lastData.enabledProviders = loadConfig().providers;
-  checkUsageNotifications(lastData);
-  try { fs.writeFileSync(cachePath, JSON.stringify(lastData)); } catch (e) {}
+  try { checkUsageNotifications(lastData); } catch (e) { console.error('Notification failed:', e); }
+  try { fs.writeFileSync(cachePath, JSON.stringify(lastData)); } catch (e) { console.error('Could not save last numbers:', e.message); }
+  const state = (x) => !x ? 'none' : x.error ? `error (${x.error})` : x.staleError ? `old (${x.staleError})` : 'ok';
+  console.log(`Refreshed in ${Date.now() - started}ms. Claude: ${claudeUsage === 'recent' ? 'reused' : state(lastData.claudeUsage)}; ` +
+    Object.entries(providers).map(([id, p]) => `${id}: ${state(p)}`).join('; '));
 
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('data-update', lastData);
 
