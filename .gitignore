@@ -1,6 +1,6 @@
 node_modules/
 dist/
+bin/
 .claude/
 .preview/
-bin/codexbar-cli.exe
 *.log
