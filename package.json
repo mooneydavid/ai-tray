@@ -24,15 +24,6 @@
       "oneClick": true,
       "perMachine": false
     },
-    "extraResources": [
-      {
-        "from": "bin",
-        "to": "bin",
-        "filter": [
-          "codexbar-cli.exe"
-        ]
-      }
-    ],
     "files": [
       "main.js",
       "preload.js",

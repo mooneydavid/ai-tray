@@ -171,7 +171,7 @@
 </div>
 
 <script>
-  // Card definitions: id -> title. Claude is native; the rest come via codexbar.
+  // Card definitions: id -> title. Claude is fetched in main.js, the rest in providers/.
   const CARDS = [
     { id: 'claude', title: 'Claude Max', name: 'Claude' },
     { id: 'codex', title: 'ChatGPT / Codex', name: 'ChatGPT' },
@@ -180,7 +180,6 @@
 
   const ICONS = {
     login: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12h-7m0 0 3 3m-3-3 3-3"/><path d="M19 6V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"/></svg>',
-    settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="m19.622 10.395-1.097-2.65L20 6l-2-2-1.735 1.483-2.707-1.113L12.935 2h-1.954l-.632 2.401-2.645 1.115L6 4 4 6l1.453 1.789-1.08 2.657L2 11v2l2.401.655L5.516 16.3 4 18l2 2 1.791-1.46 2.606 1.072L11 22h2l.604-2.387 2.651-1.098C16.697 18.831 18 20 18 20l2-2-1.484-1.75 1.098-2.652 2.386-.62V11l-2.378-.605Z"/></svg>',
   };
 
   function escapeHtml(str) {
@@ -221,7 +220,6 @@
   // Turn raw fetch errors into one plain sentence
   function friendlyError(def, pu) {
     const raw = String(pu.error || pu.staleError || '');
-    if (pu.cliMissing) return 'Needs Win-CodexBar to read this. Add it in Settings.';
     if (pu.needsLogin) return `Signed out of ${def.name}.`;
     if (/No Claude OAuth token/i.test(raw)) return 'Claude Code isn’t signed in on this PC.';
     if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|dns|network|offline/i.test(raw)) return `Can’t reach ${def.name}. Check your connection.`;
@@ -242,7 +240,7 @@
       </div>`;
   }
 
-  // Normalize Claude's native shape into the same {meters, ...} the codexbar providers use
+  // Normalize Claude's native shape into the same {meters, ...} the other providers use
   function claudeToCard(cu) {
     if (!cu) return null;
     const out = { ...cu, meters: [] };
@@ -258,7 +256,6 @@
   }
 
   function actionButton(def, pu) {
-    if (pu.cliMissing && !cliButtonShown && (cliButtonShown = true)) return `<div class="action-row"><button class="btn" data-settings>${ICONS.settings}<span>Open settings</span></button></div>`;
     if (pu.needsLogin) return `<div class="action-row"><button class="btn" data-login="${def.id}">${ICONS.login}<span>Sign in</span></button></div>`;
     return '';
   }
@@ -269,7 +266,7 @@
     if (!pu) {
       body = '<div><div class="skeleton"></div><div class="skeleton" style="width:70%"></div></div>';
     } else if (pu.error) {
-      note = `<div class="note ${pu.cliMissing ? '' : 'error'}">${escapeHtml(friendlyError(def, pu))}</div>` + actionButton(def, pu);
+      note = `<div class="note error">${escapeHtml(friendlyError(def, pu))}</div>` + actionButton(def, pu);
     } else {
       body = (pu.meters || []).map(renderMeter).join('') || '<div class="note">No usage data yet.</div>';
       if (pu.staleError) {
@@ -291,7 +288,6 @@
   }
 
   function wireButtons(root) {
-    root.querySelectorAll('[data-settings]').forEach(btn => btn.addEventListener('click', () => window.ai.openSettings()));
     root.querySelectorAll('[data-login]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.login;
@@ -319,7 +315,6 @@
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(reportHeight);
 
   let lastRendered = null;
-  let cliButtonShown = false;  // one Open settings button is enough when both cards need Win-CodexBar
 
   function renderData(data) {
     if (!data) return;
@@ -327,7 +322,6 @@
     const enabled = data.enabledProviders || {};
     const cards = document.getElementById('cards');
     const html = [];
-    cliButtonShown = false;
     for (const def of CARDS) {
       if (def.id !== 'claude' && !enabled[def.id]) continue;
       const pu = def.id === 'claude' ? claudeToCard(data.claudeUsage) : (data.providers || {})[def.id];

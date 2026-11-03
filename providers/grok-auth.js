@@ -2,9 +2,9 @@
 //
 // `grok login` (sign in with X) writes ~/.grok/auth.json with a 6-hour access token and a
 // refresh token issued by auth.x.ai, which is a standard OIDC provider. The Grok CLI only
-// refreshes when it runs, and codexbar-cli never refreshes, so without this the Grok card
-// would go stale a few hours after each login. We do the refresh_token grant ourselves and
-// write the result back so both the CLI and codexbar pick it up.
+// refreshes when it runs, so without this the Grok card would go stale a few hours after
+// each login. We do the refresh_token grant ourselves and
+// write the result back so the CLI picks it up too.
 
 const fs = require('fs');
 const path = require('path');

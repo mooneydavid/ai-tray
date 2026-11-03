@@ -45,7 +45,6 @@
 
   .app { display: flex; flex-direction: column; gap: 22px; padding: 6px 20px 20px; }
 
-  h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
 
   .list { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
   .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; min-height: 56px; }
@@ -81,25 +80,6 @@
   .switch input:checked + i::after { transform: translateX(16px); background: var(--bg); }
   .switch input:focus-visible + i { outline: 2px solid var(--ink); outline-offset: 2px; }
 
-  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-  .field-row { display: flex; gap: 8px; align-items: center; }
-  input[type=text] {
-    flex: 1; min-width: 0; height: 36px; padding: 0 12px;
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-    color: var(--ink); font: inherit; outline: none;
-    transition: border-color .2s ease;
-  }
-  input[type=text]:hover { border-color: var(--tile-line); }
-  input[type=text]:focus { border-color: var(--muted); }
-  input[type=text]::placeholder { color: var(--muted); opacity: .75; }
-
-  .hint { font-size: 13px; color: var(--muted); line-height: 1.5; margin-top: 8px; }
-  .hint.ok { color: var(--ink); }
-  .hint.bad { color: var(--high); }
-  .hint a { color: var(--ink); font-weight: 600; text-decoration: underline; text-decoration-color: var(--tile-line);
-    text-decoration-thickness: 1.5px; text-underline-offset: 3px; cursor: pointer; transition: text-decoration-color .2s ease; }
-  .hint a:hover { text-decoration-color: var(--ink); }
-
   .saved { position: fixed; right: 20px; bottom: 16px; font-size: 13px; color: var(--muted);
     opacity: 0; transition: opacity .3s ease; }
   .saved.on { opacity: 1; }
@@ -109,7 +89,6 @@
 <div class="titlebar">Settings</div>
 <div class="app">
   <section>
-    <h2>Services</h2>
     <div class="list">
       <div class="row" data-provider="claude">
         <div class="row-main">
@@ -136,21 +115,12 @@
       </div>
     </div>
   </section>
-
-  <section class="field">
-    <h2>Win-CodexBar</h2>
-    <div class="field-row">
-      <input type="text" id="codexbarPath" placeholder="Found automatically" spellcheck="false">
-    </div>
-    <div class="hint" id="cliStatus"></div>
-  </section>
 </div>
 <div class="saved" id="saved">Saved</div>
 
 <script>
   const PROVIDER_IDS = ['codex', 'grok'];
   const LOGIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12h-7m0 0 3 3m-3-3 3-3"/><path d="M19 6V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"/></svg>';
-  const RELEASES = 'https://github.com/nesszer/Win-CodexBar/releases';
 
   function setRow(id, text, cls, action) {
     const t = document.getElementById(`text-${id}`);
@@ -175,21 +145,10 @@
       const pu = data?.providers?.[id];
       if (!enabled) setRow(id, 'Hidden');
       else if (!pu) setRow(id, 'Checking…');
-      else if (pu.cliMissing) setRow(id, 'Needs Win-CodexBar', 'bad');
       else if (pu.needsLogin) setRow(id, 'Signed out', 'bad', 'login');
       else if (pu.error) setRow(id, 'Can’t connect right now', 'bad');
       else if (pu.staleError) setRow(id, 'Connected, last update failed', 'stale');
       else setRow(id, pu.plan ? `Connected · ${pu.plan}` : 'Connected');
-    }
-
-    const cli = document.getElementById('cliStatus');
-    if (data && 'cliFound' in data) {
-      cli.className = 'hint' + (data.cliFound ? '' : ' bad');
-      cli.innerHTML = data.cliFound
-        ? 'Reads ChatGPT and Grok usage. Found and working.'
-        : `Not found. <a id="getCli">Download Win-CodexBar</a> and point this at codexbar-cli.exe.`;
-      const a = document.getElementById('getCli');
-      if (a) a.addEventListener('click', () => window.ai.openExternal(RELEASES));
     }
 
     document.querySelectorAll('[data-login]').forEach(btn => btn.addEventListener('click', async () => {
@@ -205,7 +164,6 @@
   let savedTimer = null;
   async function save() {
     const config = await window.ai.getConfig();
-    config.codexbarPath = document.getElementById('codexbarPath').value.trim();
     config.providers = config.providers || {};
     for (const id of PROVIDER_IDS) config.providers[id] = document.getElementById(`toggle-${id}`).checked;
     await window.ai.saveConfig(config);
@@ -213,19 +171,14 @@
     s.classList.add('on');
     clearTimeout(savedTimer);
     savedTimer = setTimeout(() => s.classList.remove('on'), 1600);
-    render(await window.ai.getData());
   }
 
   for (const id of PROVIDER_IDS) document.getElementById(`toggle-${id}`).addEventListener('change', save);
-  const pathInput = document.getElementById('codexbarPath');
-  pathInput.addEventListener('change', save);
-  pathInput.addEventListener('keydown', e => { if (e.key === 'Enter') pathInput.blur(); });
 
   window.ai.onDataUpdate(render);
 
   (async () => {
     const config = await window.ai.getConfig();
-    pathInput.value = config.codexbarPath || '';
     for (const id of PROVIDER_IDS) document.getElementById(`toggle-${id}`).checked = !!(config.providers && config.providers[id]);
     render(await window.ai.getData());
   })();

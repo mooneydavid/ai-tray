@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
-const codexbar = require('./providers/codexbar');
+const extras = require('./providers');  // ChatGPT / Codex and Grok
 
 // `npm start` runs get their own data folder, so a dev copy never collides with (or quits
 // in favour of) the installed app, and never touches its settings.
@@ -14,8 +14,7 @@ if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), '
 const configPath = path.join(app.getPath('userData'), 'config.json');
 
 const DEFAULT_CONFIG = {
-  codexbarPath: '',                       // optional explicit path to codexbar-cli.exe
-  providers: { codex: true, grok: true }, // extra providers fetched via codexbar CLI
+  providers: { codex: true, grok: true }, // optional providers shown next to Claude
 };
 
 function loadConfig() {
@@ -274,7 +273,7 @@ function watchFile(filePath) {
 }
 function watchCredentials() {
   watchFile(CRED_PATHS.find(p => fs.existsSync(p)) || CRED_PATHS[0]);
-  for (const id of Object.keys(codexbar.PROVIDERS)) watchFile(codexbar.PROVIDERS[id].authFile);
+  for (const id of Object.keys(extras.PROVIDERS)) watchFile(extras.PROVIDERS[id].authFile);
 }
 
 // Open `claude auth login` in a visible console window to re-authenticate via browser.
@@ -412,7 +411,7 @@ function createSettingsWindow() {
 
   settingsWindow = new BrowserWindow({
     width: 420,
-    height: 400,
+    height: 262,
     useContentSize: true,
     resizable: false,
     maximizable: false,
@@ -456,7 +455,7 @@ function checkUsageNotifications(lastData) {
   }
   for (const [id, pu] of Object.entries(lastData.providers || {})) {
     if (!pu || pu.error) continue;
-    const name = codexbar.PROVIDERS[id]?.label || id;
+    const name = extras.PROVIDERS[id]?.label || id;
     for (const m of pu.meters || []) {
       checks.push({ key: `${id}:${m.key}`, pct: m.utilization, label: `${name} ${m.label}` });
     }
@@ -482,7 +481,6 @@ function checkUsageNotifications(lastData) {
 // `staleError` and the UI shows it under the (dimmed) meters.
 function mergeStale(prev, next, now) {
   if (!next || !next.error || !prev || !(prev.meters || prev.session || prev.weekly)) return next;
-  if (next.cliMissing) return next;  // configuration problem, not a transient failure
   return {
     ...prev,
     staleError: next.error,
@@ -507,15 +505,15 @@ function refreshData() {
 
 async function doRefresh() {
   const config = loadConfig();
-  const [claudeUsage, extra] = await Promise.all([
+  const [claudeUsage, results] = await Promise.all([
     fetchClaudeUsage(),
-    codexbar.fetchAll(config.codexbarPath, config.providers, {
+    extras.fetchAll(config.providers, {
       beforeCredentialWrite: suppressWatcherBriefly,
     }),
   ]);
   const now = new Date().toISOString();
   const providers = {};
-  for (const [id, result] of Object.entries(extra.results)) {
+  for (const [id, result] of Object.entries(results)) {
     const merged = mergeStale(lastData?.providers?.[id], result, now);
     if (merged && !merged.error && !merged.staleError) merged.fetchedAt = now;
     providers[id] = merged;
@@ -533,8 +531,8 @@ async function doRefresh() {
     if (!mergedClaude.error && !mergedClaude.staleError) mergedClaude.fetchedAt = now;
     lastData = { claudeUsage: mergedClaude, providers, refreshedAt: now };
   }
-  lastData.enabledProviders = config.providers;
-  lastData.cliFound = !!extra.cli;
+  // Re-read: settings may have changed while this refresh was running
+  lastData.enabledProviders = loadConfig().providers;
   checkUsageNotifications(lastData);
 
   for (const win of [mainWindow, settingsWindow]) {
@@ -548,7 +546,7 @@ async function doRefresh() {
     if (cu && cu.session) parts.push(`Claude: ${Math.round(cu.session.utilization)}%`);
     for (const [id, pu] of Object.entries(providers)) {
       const first = pu && pu.meters && pu.meters[0];
-      if (first) parts.push(`${codexbar.PROVIDERS[id].label}: ${Math.round(first.utilization)}%`);
+      if (first) parts.push(`${extras.PROVIDERS[id].label}: ${Math.round(first.utilization)}%`);
     }
     tray.setToolTip(parts.length ? `${TRAY_NAME} | ${parts.join(' | ')}` : TRAY_NAME);
   }
@@ -606,9 +604,17 @@ app.whenReady().then(async () => {
   // IPC handlers
   ipcMain.handle('get-data', () => lastData);
   ipcMain.handle('get-config', () => loadConfig());
-  ipcMain.handle('save-config', async (_, config) => {
+  ipcMain.handle('save-config', (_, config) => {
     saveConfig(config);
-    await refreshData();
+    // Show or hide cards straight away, even if a refresh is skipped during a rate-limit cooldown
+    if (lastData) {
+      lastData.enabledProviders = config.providers;
+      for (const win of [mainWindow, settingsWindow]) {
+        if (win && !win.isDestroyed()) win.webContents.send('data-update', lastData);
+      }
+    }
+    // A refresh already running was started with the old settings, so run one more after it
+    Promise.resolve(refreshInFlight).finally(() => refreshData());
     return true;
   });
   ipcMain.handle('refresh', () => {
@@ -625,7 +631,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('re-authenticate', () => launchReAuth());
   ipcMain.handle('provider-login', async (_, id) => {
-    const result = await codexbar.launchLogin(id);
+    const result = await extras.launchLogin(id);
     if (result.success) {
       watchCredentials();  // auth file may have just been created
       setTimeout(() => refreshData(), 1500);
