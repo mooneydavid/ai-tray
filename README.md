@@ -1,76 +1,69 @@
-# AI Tray — Setup Instructions
+# AI Tray
 
-A Windows system tray app showing your Claude Max session/weekly limits and Anthropic API credit balance.
+A small Windows tray app that shows how much of your Claude, ChatGPT / Codex and Grok limits you've used, and whether you're on track to run out before they reset.
 
-## What it tracks
-- **Claude Max**: Session (5-hour window) and weekly usage % with reset timers
-- **Anthropic API**: Remaining credit balance in USD
-- **ChatGPT / Codex** (optional): Session + weekly limits for your ChatGPT subscription
-- **Grok** (optional): SuperGrok credit usage
+![AI Tray popup and settings](docs/preview.png)
 
-## Requirements
-- Windows 10 or 11
-- Node.js 18+ installed (you already have this via nvm)
-- Claude Code CLI installed and logged in (you already have this)
+## What it shows
 
-## Setup
+| Service | Limits |
+| --- | --- |
+| **Claude** (Pro / Max) | 5-hour session, weekly, and extra usage if you've turned it on |
+| **ChatGPT / Codex** | 5-hour session and weekly |
+| **Grok** (SuperGrok) | Weekly or monthly credits |
 
-### Step 1 — Install Node.js for Windows
-You need a system Node.js on Windows (not just in Claude Code).
-Download from: https://nodejs.org (LTS version)
+Bars are coloured by **pace**, not a fixed percentage. The small tick on each bar is where you'd be if you spread your usage evenly across the window.
 
-### Step 2 — Install dependencies
-Open PowerShell in the ai-tray folder and run:
+- **Cream**: you'll finish under the limit at your current rate.
+- **Amber**: you're heading for the limit before it resets. The reset time is replaced by when you'll run out.
+- **Coral**: you're nearly out, or will run out well before the reset.
+
+You also get a Windows notification when any limit passes 80%.
+
+## Install
+
+1. Download `AI Tray Setup <version>.exe` from the [Releases](../../releases) page and run it. It installs for your user only, no admin needed.
+   Windows may warn that the app is from an unknown publisher, because it isn't code-signed. Choose **More info**, then **Run anyway**.
+2. Sign in to the tools you use. AI Tray reads the login each one already saves on your PC, so there's nothing to paste in.
+   - **Claude**: install [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and sign in once with `claude`.
+   - **ChatGPT / Codex**: install the [Codex CLI](https://github.com/openai/codex) and run `codex login`.
+   - **Grok**: install the Grok CLI and run `grok login --oauth`.
+3. Click the AI Tray icon near the clock. ChatGPT and Grok can be switched off in Settings if you don't use them.
+
+## Build from source
+
+You need Windows and [Node.js](https://nodejs.org) 18 or newer.
+
 ```
 npm install
+npm start          # run it from the source folder
+npm run build      # make dist\AI Tray Setup <version>.exe
 ```
 
-### Step 3 — Run the app
-```
-npm start
-```
-The app will appear in your system tray (bottom right, near the clock).
+A copy started with `npm start` keeps its settings in `%APPDATA%\ai-tray-dev`, so it never interferes with an installed copy.
 
-### Step 4 — Configure your API key
-- Right-click the tray icon → Settings (or left-click → ⚙ button)
-- Paste your Anthropic API key (sk-ant-api03-...)
-- Click Save & Refresh
+## How it works
 
-### Step 5 — Auto-start on Windows boot (optional)
-Build and install the app (see below). The installed app registers itself to start on login.
+Everything runs on your PC. There's no server, no account and no analytics.
 
-## How Claude Max auth works
-The app reads the OAuth token that Claude Code already stores on your machine at:
-`~/.claude/.credentials.json`
+| Service | Login it reads | Where it asks |
+| --- | --- | --- |
+| Claude | `~\.claude\.credentials.json` (Claude Code) | `api.anthropic.com`, and `platform.claude.com` to renew an expired login |
+| ChatGPT / Codex | `~\.codex\auth.json` (Codex CLI) | `chatgpt.com` |
+| Grok | `~\.grok\auth.json` (Grok CLI) | `cli-chat-proxy.grok.com`, and `auth.x.ai` to renew its 6-hour login |
 
-No passwords, no browser cookies. If you're logged into Claude Code, it just works.
+Good to know:
 
-## Optional: ChatGPT/Codex and Grok
-These are fetched through [Win-CodexBar](https://github.com/nesszer/Win-CodexBar)'s `codexbar-cli.exe`, which reads the
-OAuth tokens saved by the official CLIs. Nothing else is stored.
+- When a Claude or Grok login has expired, AI Tray renews it and saves the new one back to that tool's login file, so the CLI keeps working too. It won't overwrite a Claude login that Claude Code renewed in the meantime. ChatGPT logins are only read, never changed; open Codex every week or so to keep it signed in.
+- AI Tray keeps two small files in `%APPDATA%\ai-tray`: your settings, and the last numbers it fetched, so it can show them straight away after a restart.
+- It uses the same usage endpoints the official tools use. They aren't public APIs and could change without notice.
 
-1. Download `CodexBarCLI-<version>-windows-x64.zip` from the Win-CodexBar releases page, unzip, and put
-   `codexbar-cli.exe` in this folder's `bin\` directory (or set its path in Settings).
-2. ChatGPT: `npm i -g @openai/codex` then `codex login` (sign in with your ChatGPT account).
-3. Grok: install the Grok CLI, then `grok login --oauth` and sign in with X.
-4. Each provider can be toggled in Settings. The popup shows a **Sign in** button when a login is missing.
+AI Tray isn't affiliated with Anthropic, OpenAI or xAI.
 
-## How to build a standalone .exe (optional)
-```
-npm run build
-```
-This creates `dist/AI Tray Setup <version>.exe`. Run it to install (per-user, no admin) to
-`%LOCALAPPDATA%\Programs\ai-tray`. Re-running a newer installer updates in place, so the tray icon
-keeps the same identity and stays pinned to the taskbar.
+## Credits
 
-## Files
-- `main.js` — Main process (all data fetching happens here, nothing hidden)
-- `providers/codexbar.js` — Wrapper around `codexbar-cli.exe` for ChatGPT/Codex and Grok
-- `preload.js` — Secure bridge between UI and main process
-- `src/popup.html` — The popup window UI
-- `src/settings.html` — Settings window
+Reading ChatGPT and Grok usage is ported from [Win-CodexBar](https://github.com/nesszer/Win-CodexBar), the Windows port of [CodexBar](https://github.com/steipete/CodexBar) by Peter Steinberger. The interface uses the [Inter](https://rsms.me/inter/) typeface. Their licences are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Privacy
-- Zero network calls except to api.anthropic.com (plus chatgpt.com / grok.com if you enable those providers)
-- API key stored locally in your user data folder
-- No telemetry, no analytics, no external servers
+## Licence
+
+[MIT](LICENSE)

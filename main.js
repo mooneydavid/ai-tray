@@ -155,6 +155,16 @@ async function refreshTokenDirect(refreshToken) {
   }
 }
 
+// Plan name for the card header, from what Claude Code saved at login ("max" + "default_claude_max_5x" -> "Max 5x")
+function claudePlan() {
+  const cred = loadClaudeCredentials();
+  const type = cred && cred.oauth.subscriptionType;
+  if (!type) return null;
+  const tier = String(cred.oauth.rateLimitTier || '').match(/(d+x)$/);
+  const name = type.charAt(0).toUpperCase() + type.slice(1);
+  return tier && type === 'max' ? `${name} ${tier[1]}` : name;
+}
+
 // Get a valid OAuth token, refreshing if expired (or if `force` is set after a 401).
 // The credentials file is re-read on every call, so a login Claude Code refreshed itself
 // is always picked up before we try to refresh anything.
@@ -190,7 +200,7 @@ async function getClaudeOAuthToken({ force = false } = {}) {
   return token || null;
 }
 
-// Fetch Claude Max session + weekly usage via OAuth (with auto-retry on 401)
+// Fetch Claude session + weekly usage via OAuth (with auto-retry on 401)
 async function fetchClaudeUsage() {
   let token = await getClaudeOAuthToken();
   if (!token) return { error: 'No Claude OAuth token found. Make sure Claude Code is installed and logged in.' };
@@ -231,6 +241,7 @@ async function fetchClaudeUsage() {
       session: d.five_hour ? { utilization: d.five_hour.utilization, resets_at: d.five_hour.resets_at } : null,
       weekly: d.seven_day ? { utilization: d.seven_day.utilization, resets_at: d.seven_day.resets_at } : null,
       extraUsage: d.extra_usage || null,
+      plan: claudePlan(),
     };
   } catch (e) {
     return { error: e.message };

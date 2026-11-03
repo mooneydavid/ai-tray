@@ -214,7 +214,7 @@
     </div>
 
     <div class="stack" id="cards">
-      <div class="card" data-key="claude"><div class="card-head"><span class="card-title">Claude Max</span></div><div class="meters"><div><div class="skeleton"></div><div class="skeleton" style="width:70%"></div></div></div></div>
+      <div class="card" data-key="claude"><div class="card-head"><span class="card-title">Claude</span></div><div class="meters"><div><div class="skeleton"></div><div class="skeleton" style="width:70%"></div></div></div></div>
     </div>
 
     <div class="footer">
@@ -256,7 +256,7 @@
 <script>
   // Card definitions: id -> title. Claude is fetched in main.js, the rest in providers/.
   const CARDS = [
-    { id: 'claude', title: 'Claude Max', name: 'Claude' },
+    { id: 'claude', title: 'Claude', name: 'Claude' },
     { id: 'codex', title: 'ChatGPT / Codex', name: 'ChatGPT' },
     { id: 'grok', title: 'Grok', name: 'Grok' },
   ];
@@ -480,14 +480,14 @@
     const rows = [];
     const cu = data && data.claudeUsage;
     const claude = claudeToCard(cu);
-    if (!cu) rows.push(serviceRow('claude', 'Claude Max', 'Checking…'));
-    else if (claude.needsLogin) rows.push(serviceRow('claude', 'Claude Max', 'Signed out', 'bad', { login: true }));
-    else if (cu.error && /No Claude OAuth token/i.test(cu.error)) rows.push(serviceRow('claude', 'Claude Max', 'Claude Code isn’t signed in', 'bad'));
-    else if (cu.error && /rate limit|429/i.test(cu.error)) rows.push(serviceRow('claude', 'Claude Max', 'Busy, trying again soon', 'stale'));
-    else if (cu.error) rows.push(serviceRow('claude', 'Claude Max', 'Can’t connect right now', 'bad'));
-    else if (cu.staleError && /rate limit|429/i.test(cu.staleError)) rows.push(serviceRow('claude', 'Claude Max', 'Busy, trying again soon', 'stale'));
-    else if (cu.staleError) rows.push(serviceRow('claude', 'Claude Max', 'Connected, last update failed', 'stale'));
-    else rows.push(serviceRow('claude', 'Claude Max', 'Connected'));
+    if (!cu) rows.push(serviceRow('claude', 'Claude', 'Checking…'));
+    else if (claude.needsLogin) rows.push(serviceRow('claude', 'Claude', 'Signed out', 'bad', { login: true }));
+    else if (cu.error && /No Claude OAuth token/i.test(cu.error)) rows.push(serviceRow('claude', 'Claude', 'Claude Code isn’t signed in', 'bad'));
+    else if (cu.error && /rate limit|429/i.test(cu.error)) rows.push(serviceRow('claude', 'Claude', 'Busy, trying again soon', 'stale'));
+    else if (cu.error) rows.push(serviceRow('claude', 'Claude', 'Can’t connect right now', 'bad'));
+    else if (cu.staleError && /rate limit|429/i.test(cu.staleError)) rows.push(serviceRow('claude', 'Claude', 'Busy, trying again soon', 'stale'));
+    else if (cu.staleError) rows.push(serviceRow('claude', 'Claude', 'Connected, last update failed', 'stale'));
+    else rows.push(serviceRow('claude', 'Claude', cu.plan ? `Connected · ${cu.plan}` : 'Connected'));
 
     for (const id of OPTIONAL) {
       const def = CARDS.find(c => c.id === id);
