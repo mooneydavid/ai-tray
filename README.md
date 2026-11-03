@@ -24,7 +24,7 @@ You also get a Windows notification when any limit passes 80%.
 
 ## Install
 
-1. Download `AI Tray Setup <version>.exe` from the [Releases](../../releases) page and run it. It installs for your user only, no admin needed.
+1. Download `AI.Tray.Setup.<version>.exe` from the [latest release](https://github.com/mooneydavid/ai-tray/releases/latest) and run it. It installs for your user only, no admin needed.
    Windows may warn that the app is from an unknown publisher, because it isn't code-signed. Choose **More info**, then **Run anyway**.
 2. Sign in to the tools you use. AI Tray reads the login each one already saves on your PC, so there's nothing to paste in.
    - **Claude**: install [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and sign in once with `claude`.
