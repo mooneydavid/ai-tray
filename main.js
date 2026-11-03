@@ -318,6 +318,7 @@ let refreshInFlight = null;   // Promise of the in-progress refreshData(), if an
 let suppressWatcher = false;  // Suppress watcher during our own credential writes
 let lastRateLimitedAt = 0;    // Cooldown after 429
 const CLAUDE_COOLDOWN_MS = 2 * 60 * 1000;
+const CLAUDE_REUSE_MS = 2 * 60 * 1000;
 // Track which meters have already triggered an 80% notification (reset when they drop below)
 const notifiedAt80 = {};
 
@@ -458,21 +459,25 @@ function mergeStale(prev, next, now) {
   };
 }
 
-function refreshData() {
+// `force` (the refresh button) always asks Claude; other refreshes reuse Claude numbers under
+// CLAUDE_REUSE_MS old, because its usage endpoint rate-limits requests a couple of minutes apart.
+function refreshData({ force = false } = {}) {
   // Coalesce concurrent calls (watcher + polling timer + manual refresh) onto one fetch
   if (refreshInFlight) return refreshInFlight;
 
-  refreshInFlight = doRefresh().finally(() => { refreshInFlight = null; });
+  refreshInFlight = doRefresh(force).finally(() => { refreshInFlight = null; });
   return refreshInFlight;
 }
 
-async function doRefresh() {
+async function doRefresh(force) {
   const config = loadConfig();
   // During a Claude rate-limit cooldown only Claude waits; the other providers still refresh,
   // so a ChatGPT or Grok sign-in shows up straight away
   const claudeCooling = lastRateLimitedAt && Date.now() - lastRateLimitedAt < CLAUDE_COOLDOWN_MS;
+  const prevFetched = Date.parse(lastData?.claudeUsage?.fetchedAt || '');
+  const claudeRecent = !force && !lastData?.claudeUsage?.staleError && Date.now() - prevFetched < CLAUDE_REUSE_MS;
   const [claudeUsage, results] = await Promise.all([
-    claudeCooling ? 'cooling' : fetchClaudeUsage(),
+    claudeRecent ? 'recent' : claudeCooling ? 'cooling' : fetchClaudeUsage(),
     extras.fetchAll(config.providers, {
       beforeCredentialWrite: suppressWatcherBriefly,
     }),
@@ -485,7 +490,9 @@ async function doRefresh() {
     providers[id] = merged;
   }
 
-  if (claudeUsage === null || claudeUsage === 'cooling') {
+  if (claudeUsage === 'recent') {
+    lastData = { claudeUsage: lastData.claudeUsage, providers, refreshedAt: now };
+  } else if (claudeUsage === null || claudeUsage === 'cooling') {
     // Rate limited (now or recently): keep the previous Claude data, update the rest
     if (claudeUsage === null) lastRateLimitedAt = Date.now();
     const prev = lastData?.claudeUsage;
@@ -581,7 +588,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('refresh', () => {
     lastRateLimitedAt = 0;  // Manual refresh should always bypass cooldown
-    return refreshData();
+    return refreshData({ force: true });
   });
   ipcMain.handle('get-app-info', () => ({
     version: app.getVersion(),
