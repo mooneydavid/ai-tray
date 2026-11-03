@@ -110,6 +110,7 @@ function parseUsage(json) {
     label: label(w.minutes),
     utilization: w.utilization,
     resets_at: w.resets_at,
+    minutes: w.minutes,  // window length, for the pace marker
   }));
   if (!meters.length) return { error: 'No usage data yet.' };
   return { meters, plan: planName(json.plan_type) };

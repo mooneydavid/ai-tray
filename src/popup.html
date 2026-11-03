@@ -99,7 +99,15 @@
   .meter-value.warn { color: var(--warn); }
   .meter-value.high { color: var(--high); }
 
-  .meter-track { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .meter-track { grid-column: 1 / -1; position: relative; height: 6px; border-radius: 3px; background: var(--track); }
+  /* Where usage would be at an even pace through the window */
+  .meter-pace {
+    position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px;
+    background: var(--muted); transition: left 500ms var(--ease-out);
+  }
+  .meter-reset .runout { color: inherit; }
+  .meter.warn .meter-reset .runout { color: var(--warn); }
+  .meter.high .meter-reset .runout { color: var(--high); }
   .meter-fill {
     height: 100%; border-radius: 3px; background: var(--ink);
     transition: width 500ms var(--ease-out), background-color 200ms var(--ease-out);
@@ -308,15 +316,37 @@
 
   // ---------- Rendering: build HTML, then patch the live DOM so bars glide and buttons keep their state
 
+  // Compare usage with how much of the window has passed. 'ok' = on track to finish under the
+  // limit, 'warn' = heading for the limit before it resets, 'high' = nearly out or will run out well
+  // before the reset. Windows without a known length fall back to plain thresholds.
+  function pace(m, pct) {
+    if (!m.minutes || !m.resets_at) return { lv: level(pct) };
+    const total = m.minutes * 60000;
+    const left = new Date(m.resets_at) - Date.now();
+    const elapsed = Math.min(1, Math.max(0, 1 - left / total));
+    if (pct >= 100) return { lv: 'high', elapsed };
+    const projected = pct / Math.max(elapsed, 0.15);  // the first moments of a window are too noisy to judge
+    const lv = pct >= 90 || projected >= 130 ? 'high' : projected >= 100 ? 'warn' : 'ok';
+    let runsOut = null;
+    if (lv !== 'ok' && pct > 0 && elapsed > 0) {
+      const msToFull = (100 - pct) / pct * elapsed * total;
+      if (msToFull < left) runsOut = new Date(Date.now() + msToFull).toISOString();
+    }
+    return { lv, elapsed, runsOut };
+  }
+
   function renderMeter(m) {
     const pct = Math.max(0, Math.min(100, Math.round(m.utilization)));
-    const lv = level(pct);
+    const { lv, elapsed, runsOut } = pace(m, pct);
+    // The tick only appears once a window is under way (ChatGPT's don't start until first use)
+    const marker = elapsed > 0.02 && elapsed < 1 ? `<i class="meter-pace" style="left:${(elapsed * 100).toFixed(1)}%" title="Even pace"></i>` : '';
+    const right = runsOut ? `<span class="runout">runs out ${resetClock(runsOut)}</span>` : `<span>${resetClock(m.resets_at)}</span>`;
     return `
       <div class="meter ${lv}" data-key="${escapeHtml(m.label)}">
         <span class="meter-name">${escapeHtml(m.label)}</span>
         <span class="meter-value ${lv}">${m.valueText ? escapeHtml(m.valueText) : pct + '%'}</span>
-        <div class="meter-track"><div class="meter-fill ${lv}" style="width:${pct}%"></div></div>
-        ${m.resets_at ? `<div class="meter-reset"><span>${formatReset(m.resets_at)}</span><span>${resetClock(m.resets_at)}</span></div>` : ''}
+        <div class="meter-track"><div class="meter-fill ${lv}" style="width:${pct}%"></div>${marker}</div>
+        ${m.resets_at ? `<div class="meter-reset"><span>${formatReset(m.resets_at)}</span>${right}</div>` : ''}
       </div>`;
   }
 
@@ -324,8 +354,8 @@
   function claudeToCard(cu) {
     if (!cu) return null;
     const out = { ...cu, meters: [] };
-    if (cu.session) out.meters.push({ label: 'Session (5h)', utilization: cu.session.utilization, resets_at: cu.session.resets_at });
-    if (cu.weekly) out.meters.push({ label: 'Weekly', utilization: cu.weekly.utilization, resets_at: cu.weekly.resets_at });
+    if (cu.session) out.meters.push({ label: 'Session (5h)', utilization: cu.session.utilization, resets_at: cu.session.resets_at, minutes: 300 });
+    if (cu.weekly) out.meters.push({ label: 'Weekly', utilization: cu.weekly.utilization, resets_at: cu.weekly.resets_at, minutes: 7 * 24 * 60 });
     if (cu.extraUsage && cu.extraUsage.is_enabled) {
       const eu = cu.extraUsage;
       out.meters.push({ label: 'Extra usage', valueText: `$${(eu.used_credits / 100).toFixed(2)} of $${(eu.monthly_limit / 100).toFixed(0)}`, utilization: eu.utilization, resets_at: null });

@@ -29,9 +29,16 @@ function planName(raw) {
   return String(raw).trim();
 }
 
-function label(startIso, endIso) {
+// Length of the billing period in minutes (null if unknown)
+function periodMinutes(startIso, endIso) {
   const start = Date.parse(startIso), end = Date.parse(endIso);
-  const ms = isFinite(start) && isFinite(end) && end > start ? end - start : (isFinite(end) ? end - Date.now() : NaN);
+  return isFinite(start) && isFinite(end) && end > start ? Math.round((end - start) / 60000) : null;
+}
+
+function label(startIso, endIso) {
+  const minutes = periodMinutes(startIso, endIso);
+  const end = Date.parse(endIso);
+  const ms = minutes ? minutes * 60000 : (isFinite(end) ? end - Date.now() : NaN);
   const days = Math.round(ms / 86400000);
   if (days >= 4 && days <= 12) return 'Weekly';
   if (days >= 20 && days <= 45) return 'Monthly';
@@ -53,6 +60,7 @@ function parseCredits(json, authMode) {
       label: label(period.start, period.end),
       utilization: Math.max(0, Math.min(100, pct)),
       resets_at: period.end || null,
+      minutes: periodMinutes(period.start, period.end),
     }],
     plan: planName(c.subscriptionTier || json.subscriptionTier) || (authMode === 'oidc' ? 'SuperGrok' : null),
   };
