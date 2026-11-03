@@ -1,7 +1,7 @@
 {
   "name": "ai-tray",
-  "version": "1.0.0",
-  "description": "System tray app for Claude Max and Anthropic API usage",
+  "version": "1.1.0",
+  "description": "Windows tray app showing your Claude, ChatGPT/Codex and Grok usage limits",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -26,8 +26,11 @@
     },
     "extraResources": [
       {
-        "from": "bin/codexbar-cli.exe",
-        "to": "bin/codexbar-cli.exe"
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "codexbar-cli.exe"
+        ]
       }
     ],
     "files": [

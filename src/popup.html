@@ -5,260 +5,163 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Tray</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&display=swap');
+  @font-face { font-family: Inter; src: url('../assets/fonts/Inter.woff2') format('woff2'); font-weight: 100 900; font-display: block; }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  /* Warm paper, white panels, square geometry, scarce sapphire */
+  /* Warm near-black, cream ink */
   :root {
-    --paper: #f3f1ec;
-    --panel: #ffffff;
-    --ink: #14110f;
-    --muted: #737373;
-    --border: #e5e5e5;
-    --sapphire: #1e40af;
-    --blue: #2563eb;
-    --amber: #b45309;
-    --red: #b91c1c;
-    --track: rgba(20, 17, 15, 0.08);
-    /* Per-provider pastel tints — very light, keep the panels feeling like paper */
-    --tint-claude: #fbf0e8;
-    --tint-claude-border: #eedcce;
-    --tint-codex: #eaf3ec;
-    --tint-codex-border: #d3e4d8;
-    --tint-grok: #ecedf4;
-    --tint-grok-border: #d6d8e6;
-    --sans: 'Figtree', ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --bg: #11100e;
+    --ink: #efece6;
+    --muted: #b3ada3;
+    --line: #262420;
+    --card: #191815;
+    --tile: #1d1c19;
+    --tile-line: #2e2c27;
+    --track: #312e29;
+    --warn: #f0b35e;
+    --high: #f2826f;
+    --accent: #0bcff3;
+    --sans: Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   }
 
   html, body {
     width: 340px;
     overflow: hidden;
-    background: var(--paper);
+    background: var(--bg);
     color: var(--ink);
     font-family: var(--sans);
+    font-weight: 500;
     font-size: 13px;
+    line-height: 1.5;
+    letter-spacing: -.011em;
+    font-feature-settings: 'cv11', 'ss03';
     -webkit-font-smoothing: antialiased;
     user-select: none;
     cursor: default;
   }
+  svg { display: block; flex-shrink: 0; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 
-  /* Paper grain across page and cards, ~6% */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 10;
-    opacity: 0.06;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-    background-size: 160px 160px;
-  }
+  .app { display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 12px; }
 
-  .app {
-    display: flex;
-    flex-direction: column;
-    padding: 14px 16px 12px;
-    gap: 10px;
-  }
-
-  /* Header — draggable to move the window */
+  /* Header: draggable to move the window */
   .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2px 0 4px; height: 32px;
     -webkit-app-region: drag;
   }
-
-  .logo {
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: -0.03em;
-    color: var(--ink);
-    line-height: 1;
-  }
-  .logo em { font-style: normal; color: var(--blue); }
-
-  .header-actions {
-    display: flex;
-    gap: 4px;
-    -webkit-app-region: no-drag;
-  }
+  .logo { font-size: 14px; font-weight: 600; letter-spacing: -.015em; }
+  .header-actions { display: flex; gap: 2px; -webkit-app-region: no-drag; }
 
   .icon-btn {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    color: var(--muted);
-    width: 26px;
-    height: 26px;
-    border-radius: 0;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: color 0.12s, border-color 0.12s;
+    width: 30px; height: 30px; border-radius: 8px;
+    display: grid; place-items: center; color: var(--muted);
+    transition: color .2s ease, background-color .2s ease, transform .15s ease;
   }
-  .icon-btn:hover { color: var(--ink); border-color: var(--ink); }
-  .icon-btn svg { width: 13px; height: 13px; }
+  .icon-btn:hover { color: var(--ink); background: var(--tile); }
+  .icon-btn:active { transform: scale(.94); }
+  .icon-btn svg { width: 17px; height: 17px; }
 
-  /* Cards: white panel, 1px border, square, no shadow */
+  /* Cards */
+  #cards { display: flex; flex-direction: column; gap: 8px; }
   .card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 0;
-    padding: 12px 14px 13px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px 14px 14px;
+    transition: border-color .2s ease;
   }
-  .card[data-card="claude"] { background: var(--tint-claude); border-color: var(--tint-claude-border); }
-  .card[data-card="codex"]  { background: var(--tint-codex);  border-color: var(--tint-codex-border); }
-  .card[data-card="grok"]   { background: var(--tint-grok);   border-color: var(--tint-grok-border); }
-  .card[data-card="claude"] .card-head, .card[data-card="claude"] .note { border-color: var(--tint-claude-border); }
-  .card[data-card="codex"] .card-head,  .card[data-card="codex"] .note  { border-color: var(--tint-codex-border); }
-  .card[data-card="grok"] .card-head,   .card[data-card="grok"] .note   { border-color: var(--tint-grok-border); }
+  .card:hover { border-color: var(--tile-line); }
 
-  .card-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .card-title {
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: var(--ink);
-    line-height: 1;
-  }
-
+  .card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+  .card-title { font-size: 14px; font-weight: 600; line-height: 1.3; }
   .card-plan {
-    margin-left: auto;
-    font-size: 11px;
-    color: var(--muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 170px;
+    margin-left: auto; color: var(--muted); font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;
   }
 
   /* Meters */
-  .meters { display: flex; flex-direction: column; gap: 10px; }
+  .meters { display: flex; flex-direction: column; gap: 14px; transition: opacity .3s ease; }
+  .meter { display: grid; grid-template-columns: 1fr auto; align-items: baseline; row-gap: 6px; }
+  .meter-name { font-size: 13px; }
+  .meter-value { font-size: 14px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+  .meter-value.warn { color: var(--warn); }
+  .meter-value.high { color: var(--high); }
 
-  .meter {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    row-gap: 5px;
-  }
-
-  .meter-name { font-size: 12.5px; color: var(--ink); }
-
-  .meter-value {
-    font-size: 12.5px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
-    text-align: right;
-  }
-  .meter-value.ok { color: var(--ink); }
-  .meter-value.warn { color: var(--amber); }
-  .meter-value.high { color: var(--red); }
-
-  .meter-track {
-    grid-column: 1 / -1;
-    height: 4px;
-    background: var(--track);
-    border-radius: 0;
-    overflow: hidden;
-  }
-  .meter-fill { height: 100%; transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
-  .meter-fill.ok { background: var(--ink); }
-  .meter-fill.warn { background: var(--amber); }
-  .meter-fill.high { background: var(--red); }
+  .meter-track { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .meter-fill { height: 100%; border-radius: 3px; background: var(--ink); transition: width .6s cubic-bezier(.2, .8, .2, 1); }
+  .meter-fill.warn { background: var(--warn); }
+  .meter-fill.high { background: var(--high); }
 
   .meter-reset {
-    grid-column: 1 / -1;
-    font-size: 11px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-    display: flex;
-    justify-content: space-between;
+    grid-column: 1 / -1; display: flex; justify-content: space-between;
+    font-size: 12px; line-height: 1.3; color: var(--muted); font-variant-numeric: tabular-nums;
   }
 
-  /* Stale: dim the meters, explain underneath */
-  .card.is-stale .meters { opacity: 0.5; }
+  .meter.high .meter-reset { color: var(--ink); }
+
+  .card.is-stale .meters { opacity: .45; }
 
   .note {
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border);
-    font-size: 11.5px;
-    line-height: 1.45;
-    color: var(--muted);
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
+    font-size: 13px; line-height: 1.5; color: var(--muted);
   }
-  .note.warn { color: var(--amber); }
-  .note.error { color: var(--red); }
+  .card-head + .note { margin-top: 0; padding-top: 0; border-top: 0; }
+  .note.warn { color: var(--warn); }
+  .note.error { color: var(--high); }
   .note b { font-weight: 600; color: var(--ink); }
 
-  /* The one primary action per card: compact, rectangular, sapphire */
-  .action-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-
+  /* One action per card: cream pill, like the site's button */
+  .action-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
   .btn {
-    font-family: var(--sans);
-    font-size: 12px;
-    font-weight: 500;
-    border-radius: 0;
-    padding: 6px 12px;
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: background 0.12s;
+    display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+    height: 32px; padding: 0 14px; border-radius: 16px;
+    background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 600;
+    transition: background-color .2s ease, transform .15s ease, opacity .2s ease;
   }
-  .btn-primary { background: var(--sapphire); color: #fff; border-color: var(--sapphire); }
-  .btn-primary:hover { background: #1a3894; }
-  .btn-primary:disabled { opacity: 0.5; cursor: default; }
-
-  .action-hint { font-size: 11px; color: var(--muted); line-height: 1.4; }
+  .btn svg { width: 15px; height: 15px; }
+  .btn:hover { background: #fff; }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .5; cursor: default; transform: none; }
 
   /* Footer */
   .footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: 2px;
-    font-size: 11px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 4px; font-size: 12px; line-height: 1.3; color: var(--muted); font-variant-numeric: tabular-nums;
   }
   .footer .status.busy { color: var(--ink); }
 
-  .spinning { animation: spin 0.9s linear infinite; }
-  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .spinning svg { animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+  .skeleton { height: 10px; border-radius: 5px; background: var(--track); animation: pulse 1.4s ease-in-out infinite; }
+  .skeleton + .skeleton { margin-top: 10px; }
 
-  .skeleton { height: 10px; background: var(--track); animation: pulse 1.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0s !important; animation-duration: 0s !important; }
+  }
 </style>
 </head>
 <body>
 <div class="app">
   <div class="header">
-    <div class="logo">ai<em>.</em>tray</div>
+    <div class="logo">AI Tray</div>
     <div class="header-actions">
       <button class="icon-btn" id="refreshBtn" title="Refresh">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.168 8A10.003 10.003 0 0 0 12 2C6.815 2 2.551 5.947 2.05 11"/><path d="M17 8h4.4a.6.6 0 0 0 .6-.6V3"/><path d="M2.881 16c1.544 3.532 5.068 6 9.168 6 5.186 0 9.45-3.947 9.951-9"/><path d="M7.05 16H2.65a.6.6 0 0 0-.6.6V21"/></svg>
       </button>
       <button class="icon-btn" id="settingsBtn" title="Settings">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="m19.622 10.395-1.097-2.65L20 6l-2-2-1.735 1.483-2.707-1.113L12.935 2h-1.954l-.632 2.401-2.645 1.115L6 4 4 6l1.453 1.789-1.08 2.657L2 11v2l2.401.655L5.516 16.3 4 18l2 2 1.791-1.46 2.606 1.072L11 22h2l.604-2.387 2.651-1.098C16.697 18.831 18 20 18 20l2-2-1.484-1.75 1.098-2.652 2.386-.62V11l-2.378-.605Z"/></svg>
       </button>
       <button class="icon-btn" id="quitBtn" title="Close">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.758 17.243 12.001 12m5.243-5.243L12.001 12m0 0L6.758 6.757M12.001 12l5.243 5.243"/></svg>
       </button>
     </div>
   </div>
 
   <div id="cards">
-    <div class="card" data-card="claude"><div class="card-head"><span class="card-title">Claude Max</span></div><div class="meters"><div class="skeleton"></div><div class="skeleton" style="width:70%"></div></div></div>
+    <div class="card" data-card="claude"><div class="card-head"><span class="card-title">Claude Max</span></div><div class="meters"><div><div class="skeleton"></div><div class="skeleton" style="width:70%"></div></div></div></div>
   </div>
 
   <div class="footer">
@@ -270,10 +173,15 @@
 <script>
   // Card definitions: id -> title. Claude is native; the rest come via codexbar.
   const CARDS = [
-    { id: 'claude', title: 'Claude Max' },
-    { id: 'codex', title: 'ChatGPT / Codex' },
-    { id: 'grok', title: 'Grok' },
+    { id: 'claude', title: 'Claude Max', name: 'Claude' },
+    { id: 'codex', title: 'ChatGPT / Codex', name: 'ChatGPT' },
+    { id: 'grok', title: 'Grok', name: 'Grok' },
   ];
+
+  const ICONS = {
+    login: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12h-7m0 0 3 3m-3-3 3-3"/><path d="M19 6V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"/></svg>',
+    settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="m19.622 10.395-1.097-2.65L20 6l-2-2-1.735 1.483-2.707-1.113L12.935 2h-1.954l-.632 2.401-2.645 1.115L6 4 4 6l1.453 1.789-1.08 2.657L2 11v2l2.401.655L5.516 16.3 4 18l2 2 1.791-1.46 2.606 1.072L11 22h2l.604-2.387 2.651-1.098C16.697 18.831 18 20 18 20l2-2-1.484-1.75 1.098-2.652 2.386-.62V11l-2.378-.605Z"/></svg>',
+  };
 
   function escapeHtml(str) {
     return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -296,7 +204,7 @@
     if (diff < 0) return 'resetting';
     const h = Math.floor(diff / 3600000);
     const m = Math.floor((diff % 3600000) / 60000);
-    if (h >= 48) return `resets in ${Math.floor(h / 24)}d ${h % 24}h`;
+    if (h >= 24) return `resets in ${Math.floor(h / 24)}d ${h % 24}h`;
     if (h > 0) return `resets in ${h}h ${m}m`;
     return `resets in ${m}m`;
   }
@@ -310,15 +218,27 @@
       : d.toLocaleDateString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   }
 
+  // Turn raw fetch errors into one plain sentence
+  function friendlyError(def, pu) {
+    const raw = String(pu.error || pu.staleError || '');
+    if (pu.cliMissing) return 'Needs Win-CodexBar to read this. Add it in Settings.';
+    if (pu.needsLogin) return `Signed out of ${def.name}.`;
+    if (/No Claude OAuth token/i.test(raw)) return 'Claude Code isn’t signed in on this PC.';
+    if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|dns|network|offline/i.test(raw)) return `Can’t reach ${def.name}. Check your connection.`;
+    if (/timeout|timed out/i.test(raw)) return `${def.name} didn’t answer in time.`;
+    if (/rate limit|429/i.test(raw)) return `${def.name} asked us to slow down. Trying again in a few minutes.`;
+    return raw || 'Something went wrong.';
+  }
+
   function renderMeter(m) {
     const pct = Math.max(0, Math.min(100, Math.round(m.utilization)));
     const lv = level(pct);
     return `
-      <div class="meter">
+      <div class="meter ${lv}">
         <span class="meter-name">${escapeHtml(m.label)}</span>
-        <span class="meter-value ${lv}">${pct}%</span>
+        <span class="meter-value ${lv}">${m.valueText ? escapeHtml(m.valueText) : pct + '%'}</span>
         <div class="meter-track"><div class="meter-fill ${lv}" style="width:${pct}%"></div></div>
-        <div class="meter-reset"><span>${formatReset(m.resets_at)}</span><span>${resetClock(m.resets_at)}</span></div>
+        ${m.resets_at ? `<div class="meter-reset"><span>${formatReset(m.resets_at)}</span><span>${resetClock(m.resets_at)}</span></div>` : ''}
       </div>`;
   }
 
@@ -330,68 +250,61 @@
     if (cu.weekly) out.meters.push({ label: 'Weekly', utilization: cu.weekly.utilization, resets_at: cu.weekly.resets_at });
     if (cu.extraUsage && cu.extraUsage.is_enabled) {
       const eu = cu.extraUsage;
-      out.meters.push({ label: `Overuse $${(eu.used_credits / 100).toFixed(2)} / $${(eu.monthly_limit / 100).toFixed(0)}`, utilization: eu.utilization, resets_at: null });
+      out.meters.push({ label: 'Extra usage', valueText: `$${(eu.used_credits / 100).toFixed(2)} of $${(eu.monthly_limit / 100).toFixed(0)}`, utilization: eu.utilization, resets_at: null });
     }
-    if (cu.error && /401|token|OAuth|expired/i.test(cu.error)) out.needsLogin = true;
+    if (cu.error && /401|token|OAuth|expired/i.test(cu.error) && !/No Claude OAuth token/i.test(cu.error)) out.needsLogin = true;
     if (cu.staleError && /401|token|OAuth|expired/i.test(cu.staleError)) out.needsLogin = true;
     return out;
   }
 
-  function signInButton(id, hint) {
-    return `
-      <div class="action-row">
-        <button class="btn btn-primary" data-login="${id}">${id === 'claude' ? 'Re-authenticate' : 'Sign in'}</button>
-        <span class="action-hint">${escapeHtml(hint)}</span>
-      </div>`;
+  function actionButton(def, pu) {
+    if (pu.cliMissing && !cliButtonShown && (cliButtonShown = true)) return `<div class="action-row"><button class="btn" data-settings>${ICONS.settings}<span>Open settings</span></button></div>`;
+    if (pu.needsLogin) return `<div class="action-row"><button class="btn" data-login="${def.id}">${ICONS.login}<span>Sign in</span></button></div>`;
+    return '';
   }
 
   function renderCard(def, pu) {
     let head = '', body = '', note = '', stale = false;
 
     if (!pu) {
-      body = '<div class="skeleton"></div><div class="skeleton" style="width:70%"></div>';
+      body = '<div><div class="skeleton"></div><div class="skeleton" style="width:70%"></div></div>';
     } else if (pu.error) {
-      if (pu.cliMissing) {
-        note = `<div class="note">${escapeHtml(pu.error)}</div>`;
-      } else if (pu.needsLogin) {
-        note = `<div class="note error">${escapeHtml(pu.error)}</div>` + signInButton(def.id, def.id === 'claude' ? 'Opens a sign-in window and your browser.' : 'Opens your browser.');
-      } else {
-        note = `<div class="note error">${escapeHtml(pu.error)}</div>`;
-      }
+      note = `<div class="note ${pu.cliMissing ? '' : 'error'}">${escapeHtml(friendlyError(def, pu))}</div>` + actionButton(def, pu);
     } else {
-      body = (pu.meters || []).map(renderMeter).join('') || '<div class="note">No usage data returned.</div>';
+      body = (pu.meters || []).map(renderMeter).join('') || '<div class="note">No usage data yet.</div>';
       if (pu.staleError) {
         stale = true;
-        note = `<div class="note warn"><b>Showing ${fmtTime(pu.staleSince)} data.</b> ${escapeHtml(pu.staleError)}</div>`;
-        if (pu.needsLogin) note += signInButton(def.id, def.id === 'claude' ? 'Opens a sign-in window and your browser.' : 'Opens your browser.');
+        note = `<div class="note warn"><b>From ${fmtTime(pu.staleSince)}.</b> ${escapeHtml(friendlyError(def, { staleError: pu.staleError }))}</div>` + actionButton(def, pu);
       }
-      head = [pu.plan, pu.email].filter(Boolean).join(' · ');
+      head = pu.plan || '';
     }
 
     return `
       <div class="card ${stale ? 'is-stale' : ''}" data-card="${def.id}">
         <div class="card-head">
           <span class="card-title">${def.title}</span>
-          ${head ? `<span class="card-plan" title="${escapeHtml(head)}">${escapeHtml(head)}</span>` : ''}
+          ${head ? `<span class="card-plan">${escapeHtml(head)}</span>` : ''}
         </div>
         ${body ? `<div class="meters">${body}</div>` : ''}
         ${note}
       </div>`;
   }
 
-  function wireLoginButtons(root) {
+  function wireButtons(root) {
+    root.querySelectorAll('[data-settings]').forEach(btn => btn.addEventListener('click', () => window.ai.openSettings()));
     root.querySelectorAll('[data-login]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.login;
-        const original = btn.textContent;
+        const label = btn.querySelector('span');
+        const original = label.textContent;
         btn.disabled = true;
-        btn.textContent = id === 'claude' ? 'Finish in the sign-in window…' : 'Opening browser…';
+        label.textContent = id === 'claude' ? 'Finish in the sign-in window…' : 'Finish in your browser…';
         const result = id === 'claude' ? await window.ai.reAuthenticate() : await window.ai.providerLogin(id);
         if (result && result.success) {
-          btn.textContent = 'Signed in';
+          label.textContent = 'Signed in';
         } else {
           btn.disabled = false;
-          btn.textContent = original;
+          label.textContent = original;
         }
       });
     });
@@ -406,6 +319,7 @@
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(reportHeight);
 
   let lastRendered = null;
+  let cliButtonShown = false;  // one Open settings button is enough when both cards need Win-CodexBar
 
   function renderData(data) {
     if (!data) return;
@@ -413,16 +327,17 @@
     const enabled = data.enabledProviders || {};
     const cards = document.getElementById('cards');
     const html = [];
+    cliButtonShown = false;
     for (const def of CARDS) {
       if (def.id !== 'claude' && !enabled[def.id]) continue;
       const pu = def.id === 'claude' ? claudeToCard(data.claudeUsage) : (data.providers || {})[def.id];
       html.push(renderCard(def, pu));
     }
     cards.innerHTML = html.join('');
-    wireLoginButtons(cards);
+    wireButtons(cards);
 
     setStatus('');
-    document.getElementById('refreshTime').textContent = `updated ${fmtTime(data.refreshedAt)}`;
+    document.getElementById('refreshTime').textContent = data.refreshedAt ? `Updated ${fmtTime(data.refreshedAt)}` : '';
     reportHeight();
   }
 
@@ -432,13 +347,13 @@
     s.className = 'status' + (busy ? ' busy' : '');
   }
 
-  // Keep "resets in" countdowns and the stale threshold current while the popup is open
+  // Keep "resets in" countdowns current while the popup is open
   setInterval(() => { if (lastRendered) renderData(lastRendered); }, 60000);
 
   document.getElementById('refreshBtn').addEventListener('click', async () => {
     const btn = document.getElementById('refreshBtn');
     btn.classList.add('spinning');
-    setStatus('refreshing…', true);
+    setStatus('Refreshing…', true);
     await window.ai.refresh();
     btn.classList.remove('spinning');
     if (lastRendered) setStatus('');

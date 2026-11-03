@@ -1,16 +1,19 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, Notification } = require('electron');
-const { execFile, spawn } = require('child_process');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, Notification, powerMonitor, screen } = require('electron');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
 const codexbar = require('./providers/codexbar');
 
+// `npm start` runs get their own data folder, so a dev copy never collides with (or quits
+// in favour of) the installed app, and never touches its settings.
+if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), 'ai-tray-dev'));
+
 // Config stored in user data dir
 const configPath = path.join(app.getPath('userData'), 'config.json');
 
 const DEFAULT_CONFIG = {
-  apiKey: '',
   codexbarPath: '',                       // optional explicit path to codexbar-cli.exe
   providers: { codex: true, grok: true }, // extra providers fetched via codexbar CLI
 };
@@ -86,17 +89,34 @@ function loadClaudeCredentials() {
   return null;
 }
 
-// Save updated credentials back to disk (suppresses watcher to avoid feedback loop)
-function saveClaudeCredentials(filePath, rawCreds) {
+// Save a refreshed login back to Claude Code's credentials file. Claude Code shares this
+// file, so re-read it first: if its refresh token is no longer the one we used, Claude Code
+// rotated it in the meantime and its copy wins. Written atomically (tmp + rename) so Claude
+// Code never reads a half-written file.
+function saveClaudeTokens(filePath, usedRefreshToken, tokens) {
   try {
-    suppressWatcher = true;
-    fs.writeFileSync(filePath, JSON.stringify(rawCreds, null, 2));
-    // Keep suppressed briefly so the watcher event fires and gets ignored
-    setTimeout(() => { suppressWatcher = false; }, 2000);
+    const current = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const oauth = current.claudeAiOauth || {};
+    const onDisk = oauth.refreshToken || oauth.refresh_token;
+    if (onDisk && onDisk !== usedRefreshToken) {
+      console.log('Claude Code updated its login meanwhile; leaving its file alone.');
+      return;
+    }
+    current.claudeAiOauth = { ...oauth, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresAt: tokens.expiresAt };
+    suppressWatcherBriefly();
+    const tmp = `${filePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(current, null, 2));
+    fs.renameSync(tmp, filePath);
   } catch (e) {
-    suppressWatcher = false;
     console.error('Failed to save refreshed credentials:', e.message);
   }
+}
+
+// Ignore file-watcher events caused by our own credential writes
+function suppressWatcherBriefly() {
+  suppressWatcher = true;
+  clearTimeout(suppressWatcherBriefly.timer);
+  suppressWatcherBriefly.timer = setTimeout(() => { suppressWatcher = false; }, 2000);
 }
 
 // Claude Code's public OAuth client ID
@@ -133,73 +153,38 @@ async function refreshTokenDirect(refreshToken) {
   }
 }
 
-// Fallback: delegate refresh to the Claude CLI (triggers its internal refresh)
-function refreshTokenViaCLI() {
-  const { execSync } = require('child_process');
-  return new Promise((resolve) => {
-    try {
-      // Running any claude command triggers the CLI's internal token refresh
-      execSync('claude --version', { timeout: 15000, stdio: 'ignore' });
-      // Give the CLI a moment to write the refreshed credentials
-      setTimeout(() => resolve(true), 1000);
-    } catch (e) {
-      console.error('CLI refresh failed:', e.message);
-      resolve(false);
-    }
-  });
-}
-
-// Get a valid OAuth token, refreshing if expired
-async function getClaudeOAuthToken() {
+// Get a valid OAuth token, refreshing if expired (or if `force` is set after a 401).
+// The credentials file is re-read on every call, so a login Claude Code refreshed itself
+// is always picked up before we try to refresh anything.
+async function getClaudeOAuthToken({ force = false } = {}) {
   const cred = loadClaudeCredentials();
   if (!cred) return null;
 
-  const { filePath, oauth, raw } = cred;
+  const { filePath, oauth } = cred;
   const token = oauth.accessToken || oauth.access_token;
   const refreshTk = oauth.refreshToken || oauth.refresh_token;
   const expiresAt = oauth.expiresAt || oauth.expires_at;
 
-  // Check if token is still valid (with 60s buffer)
-  if (token && expiresAt && Date.now() < expiresAt - 60000) {
+  // Still valid (with 60s buffer)
+  if (!force && token && expiresAt && Date.now() < expiresAt - 60000) {
     return token;
   }
+  if (!refreshTk) return token || null;
 
-  console.log('OAuth token expired, attempting refresh...');
-
-  // Strategy 1: Direct refresh using the refresh token
-  if (refreshTk) {
-    const refreshed = await refreshTokenDirect(refreshTk);
-    if (refreshed) {
-      console.log('Token refreshed via direct OAuth.');
-      // Update credentials on disk
-      raw.claudeAiOauth = {
-        ...oauth,
-        accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken,
-        expiresAt: refreshed.expiresAt,
-      };
-      saveClaudeCredentials(filePath, raw);
-      return refreshed.accessToken;
-    }
+  console.log('OAuth token expired, refreshing...');
+  const refreshed = await refreshTokenDirect(refreshTk);
+  if (refreshed) {
+    console.log('Token refreshed.');
+    saveClaudeTokens(filePath, refreshTk, refreshed);
+    return refreshed.accessToken;
   }
 
-  // Strategy 2: Delegate to Claude CLI to trigger its own refresh
-  console.log('Direct refresh failed, trying Claude CLI fallback...');
-  const cliOk = await refreshTokenViaCLI();
-  if (cliOk) {
-    // Re-read credentials after CLI refresh
-    const updated = loadClaudeCredentials();
-    if (updated) {
-      const newToken = updated.oauth.accessToken || updated.oauth.access_token;
-      if (newToken && newToken !== token) {
-        console.log('Token refreshed via Claude CLI.');
-        return newToken;
-      }
-    }
-  }
+  // Claude Code may have refreshed it while our request was in flight
+  const again = loadClaudeCredentials();
+  const latest = again && (again.oauth.accessToken || again.oauth.access_token);
+  if (latest && latest !== token) return latest;
 
-  // Last resort: return the expired token and let the caller handle 401
-  console.warn('Token refresh failed, using potentially expired token.');
+  console.warn('Token refresh failed.');
   return token || null;
 }
 
@@ -218,16 +203,14 @@ async function fetchClaudeUsage() {
   try {
     let res = await doFetch(token);
 
-    // If 401, force a refresh and retry once
+    // If 401, refresh once and retry (without touching Claude Code's file unless the refresh works)
     if (res.status === 401) {
-      console.log('Got 401, forcing token refresh...');
-      const cred = loadClaudeCredentials();
-      if (cred) {
-        cred.raw.claudeAiOauth.expiresAt = 0;
-        saveClaudeCredentials(cred.filePath, cred.raw);
-      }
-      token = await getClaudeOAuthToken();
-      if (token) {
+      console.log('Got 401, refreshing token...');
+      // If Claude Code already wrote a newer token, use that rather than refreshing again
+      const onDisk = await getClaudeOAuthToken();
+      const fresh = onDisk && onDisk !== token ? onDisk : await getClaudeOAuthToken({ force: true });
+      if (fresh) {
+        token = fresh;
         res = await doFetch(token);
       }
     }
@@ -261,30 +244,36 @@ async function fetchClaudeUsage() {
   }
 }
 
-// Watch credential files for external re-auth (e.g. user runs `claude`/`codex login`/`grok login` in a terminal)
+// Watch credential files for external re-auth (e.g. user runs `claude`/`codex login`/`grok login` in a terminal).
+// We watch the folder, not the file: the CLIs save by replacing the file, and a watch on the
+// old file silently stops firing after the first replace.
 const credWatchers = new Map();
 function watchFile(filePath) {
-  if (!filePath || credWatchers.has(filePath)) return;
-  if (!fs.existsSync(filePath)) return;
+  if (!filePath) return;
+  const dir = path.dirname(filePath);
+  const name = path.basename(filePath);
+  if (credWatchers.has(filePath) || !fs.existsSync(dir)) return;
   try {
     let debounce = null;
-    const w = fs.watch(filePath, { persistent: false }, () => {
+    const w = fs.watch(dir, { persistent: false }, (_, changed) => {
+      if (changed && changed !== name) return;
       // Ignore changes we caused ourselves (token refresh writes)
       if (suppressWatcher) return;
       // Debounce since the file may be written multiple times quickly
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
-        console.log(`Credentials changed externally (${path.basename(path.dirname(filePath))}), refreshing data...`);
+        console.log(`Credentials changed externally (${path.basename(dir)}), refreshing data...`);
         refreshData();
       }, 3000);
     });
+    w.on('error', () => { credWatchers.delete(filePath); });
     credWatchers.set(filePath, w);
   } catch (e) {
-    console.error('Failed to watch credentials file:', e.message);
+    console.error('Failed to watch credentials folder:', e.message);
   }
 }
 function watchCredentials() {
-  watchFile(CRED_PATHS.find(p => fs.existsSync(p)));
+  watchFile(CRED_PATHS.find(p => fs.existsSync(p)) || CRED_PATHS[0]);
   for (const id of Object.keys(codexbar.PROVIDERS)) watchFile(codexbar.PROVIDERS[id].authFile);
 }
 
@@ -343,59 +332,75 @@ function createTrayIcon() {
   return nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png'));
 }
 
+const BG = '#11100e';
+const TRAY_NAME = app.isPackaged ? 'AI Tray' : 'AI Tray (dev)';
+let popupMoved = false;     // user dragged the popup away from the tray: keep it open on blur
+let popupOrigin = null;     // where we last placed it, to detect a drag
+let popupHiddenAt = 0;      // when blur last hid it, so a click on the tray icon closes instead of reopening
+
+// The popup is created hidden at startup so the first click opens it instantly at the right size
 function createMainWindow() {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show();
-    mainWindow.focus();
-    return;
-  }
+  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
 
   mainWindow = new BrowserWindow({
     width: 340,
     height: 320,
+    show: false,
     resizable: false,
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
+    backgroundColor: BG,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: false,  // keep measuring height and ticking countdowns while hidden
       preload: path.join(__dirname, 'preload.js'),
     },
   });
 
   mainWindow.loadFile('src/popup.html');
-
-  // Track whether the window has been moved from its default tray position.
-  // If moved, don't auto-hide on blur so the user can interact with other things.
-  let movedFromTray = false;
-  const origPos = { x: null, y: null };
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (lastData) mainWindow.webContents.send('data-update', lastData);
+  });
 
   mainWindow.on('move', () => {
-    if (origPos.x === null) return;
+    if (!popupOrigin || !mainWindow.isVisible()) return;
     const [cx, cy] = mainWindow.getPosition();
-    if (Math.abs(cx - origPos.x) > 10 || Math.abs(cy - origPos.y) > 10) {
-      movedFromTray = true;
-    }
+    if (Math.abs(cx - popupOrigin.x) > 10 || Math.abs(cy - popupOrigin.y) > 10) popupMoved = true;
   });
 
   mainWindow.on('blur', () => {
-    if (mainWindow && !mainWindow.isDestroyed() && !movedFromTray) {
+    if (mainWindow && !mainWindow.isDestroyed() && !popupMoved) {
       mainWindow.hide();
+      popupHiddenAt = Date.now();
     }
   });
 
-  // Expose a way to record the initial position after positioning near tray
-  mainWindow._setOrigPos = () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      const [x, y] = mainWindow.getPosition();
-      origPos.x = x;
-      origPos.y = y;
-      movedFromTray = false;
-    }
-  };
-
   mainWindow.on('closed', () => { mainWindow = null; });
+  return mainWindow;
+}
+
+function showPopup() {
+  createMainWindow();
+  popupMoved = false;
+  positionWindowNearTray();
+  if (lastData) mainWindow.webContents.send('data-update', lastData);
+  mainWindow.show();
+  mainWindow.focus();
+  // Always fetch fresh data when the popup opens
+  lastRateLimitedAt = 0;
+  refreshData();
+}
+
+function togglePopup() {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+    mainWindow.hide();
+    return;
+  }
+  // Clicking the tray icon blurs the popup first, which hides it; don't reopen on that same click
+  if (Date.now() - popupHiddenAt < 300) return;
+  showPopup();
 }
 
 function createSettingsWindow() {
@@ -407,9 +412,14 @@ function createSettingsWindow() {
 
   settingsWindow = new BrowserWindow({
     width: 420,
-    height: 470,
+    height: 400,
+    useContentSize: true,
     resizable: false,
+    maximizable: false,
     title: 'AI Tray Settings',
+    backgroundColor: BG,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: BG, symbolColor: '#b3ada3', height: 40 },
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -421,15 +431,20 @@ function createSettingsWindow() {
   settingsWindow.on('closed', () => { settingsWindow = null; });
 }
 
+// Centre the popup above (or below) the tray icon, kept inside the screen's usable area
 function positionWindowNearTray() {
   if (!mainWindow || !tray) return;
   const trayBounds = tray.getBounds();
-  const windowBounds = mainWindow.getBounds();
-  const x = Math.round(trayBounds.x + trayBounds.width / 2 - windowBounds.width / 2);
-  const y = trayBounds.y - windowBounds.height - 4;
-  mainWindow.setPosition(x, Math.max(0, y));
-  // Record origin so we can detect if user drags the window away
-  if (mainWindow._setOrigPos) mainWindow._setOrigPos();
+  const { width, height } = mainWindow.getBounds();
+  const area = screen.getDisplayMatching(trayBounds).workArea;
+  let x = Math.round(trayBounds.x + trayBounds.width / 2 - width / 2);
+  let y = trayBounds.y > area.y + area.height / 2
+    ? trayBounds.y - height - 4               // taskbar at the bottom
+    : trayBounds.y + trayBounds.height + 4;   // taskbar at the top
+  x = Math.min(Math.max(x, area.x + 8), area.x + area.width - width - 8);
+  y = Math.min(Math.max(y, area.y + 8), area.y + area.height - height - 8);
+  mainWindow.setPosition(x, y);
+  popupOrigin = { x, y };
 }
 
 function checkUsageNotifications(lastData) {
@@ -495,7 +510,7 @@ async function doRefresh() {
   const [claudeUsage, extra] = await Promise.all([
     fetchClaudeUsage(),
     codexbar.fetchAll(config.codexbarPath, config.providers, {
-      beforeCredentialWrite: () => { suppressWatcher = true; setTimeout(() => { suppressWatcher = false; }, 2000); },
+      beforeCredentialWrite: suppressWatcherBriefly,
     }),
   ]);
   const now = new Date().toISOString();
@@ -522,8 +537,8 @@ async function doRefresh() {
   lastData.cliFound = !!extra.cli;
   checkUsageNotifications(lastData);
 
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('data-update', lastData);
+  for (const win of [mainWindow, settingsWindow]) {
+    if (win && !win.isDestroyed()) win.webContents.send('data-update', lastData);
   }
 
   // Update tray tooltip: one entry per provider's primary meter
@@ -535,7 +550,7 @@ async function doRefresh() {
       const first = pu && pu.meters && pu.meters[0];
       if (first) parts.push(`${codexbar.PROVIDERS[id].label}: ${Math.round(first.utilization)}%`);
     }
-    tray.setToolTip(parts.length ? `AI Tray | ${parts.join(' | ')}` : 'AI Tray');
+    tray.setToolTip(parts.length ? `${TRAY_NAME} | ${parts.join(' | ')}` : TRAY_NAME);
   }
 }
 
@@ -544,11 +559,7 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    createMainWindow();
-    positionWindowNearTray();
-    refreshData();
-  });
+  app.on('second-instance', () => showPopup());
 }
 
 // Auto-start on login: only the installed build, and only the copy that owns the tray.
@@ -578,10 +589,10 @@ app.whenReady().then(async () => {
   // Create tray with static icon
   const icon = createTrayIcon();
   tray = new Tray(icon);
-  tray.setToolTip('AI Tray — Loading...');
+  tray.setToolTip(`${TRAY_NAME}: loading…`);
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Open', click: () => { createMainWindow(); positionWindowNearTray(); } },
+    { label: 'Open', click: () => showPopup() },
     { label: 'Refresh', click: () => refreshData() },
     { label: 'Settings', click: () => createSettingsWindow() },
     { type: 'separator' },
@@ -590,33 +601,7 @@ app.whenReady().then(async () => {
 
   tray.setContextMenu(contextMenu);
 
-  tray.on('click', () => {
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
-      mainWindow.hide();
-    } else {
-      const isNewWindow = !mainWindow || mainWindow.isDestroyed();
-      createMainWindow();
-      positionWindowNearTray();
-      // Reset moved state when reopening via tray click
-      if (mainWindow._setOrigPos) mainWindow._setOrigPos();
-      if (isNewWindow) {
-        // New window: send cached data after page loads
-        if (lastData) {
-          mainWindow.webContents.once('did-finish-load', () => {
-            mainWindow.webContents.send('data-update', lastData);
-          });
-        }
-      } else {
-        // Re-shown window: send cached data immediately (page already loaded)
-        if (lastData) {
-          mainWindow.webContents.send('data-update', lastData);
-        }
-      }
-      // Always fetch fresh data when popup opens
-      lastRateLimitedAt = 0;
-      refreshData();
-    }
-  });
+  tray.on('click', () => togglePopup());
 
   // IPC handlers
   ipcMain.handle('get-data', () => lastData);
@@ -650,15 +635,23 @@ app.whenReady().then(async () => {
   // Popup reports its content height so the window fits however many cards are shown
   ipcMain.on('set-height', (_, height) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    const h = Math.max(200, Math.min(900, Math.round(height)));
+    const h = Math.max(120, Math.min(900, Math.round(height)));
     const [w, cur] = mainWindow.getSize();
     if (Math.abs(cur - h) < 2) return;
     mainWindow.setSize(w, h);
-    positionWindowNearTray();
+    if (!popupMoved) positionWindowNearTray();  // if the user placed it somewhere, don't snap it back
   });
 
-  // Watch credentials file for external re-auth
+  // Build the popup now (hidden) so the first click shows it straight away
+  createMainWindow();
+
+  // Watch credentials for external re-auth
   watchCredentials();
+
+  // After sleep or a locked screen the numbers are stale: refresh once the network is back
+  const refreshSoon = () => setTimeout(() => { lastRateLimitedAt = 0; refreshData(); }, 5000);
+  powerMonitor.on('resume', refreshSoon);
+  powerMonitor.on('unlock-screen', refreshSoon);
 
   // Initial fetch + polling. At login the network is often not up yet, so if the first
   // fetches all fail, retry on a short backoff (30s, 60s, 120s) before settling into 5 min.

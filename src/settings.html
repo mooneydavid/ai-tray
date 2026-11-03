@@ -4,272 +4,231 @@
 <meta charset="UTF-8">
 <title>Settings</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&display=swap');
+  @font-face { font-family: Inter; src: url('../assets/fonts/Inter.woff2') format('woff2'); font-weight: 100 900; font-display: block; }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --paper: #f3f1ec;
-    --panel: #ffffff;
-    --ink: #14110f;
-    --muted: #737373;
-    --border: #e5e5e5;
-    --sapphire: #1e40af;
-    --blue: #2563eb;
-    --amber: #b45309;
-    --red: #b91c1c;
-    --tint-claude: #fbf0e8; --tint-claude-border: #eedcce;
-    --tint-codex: #eaf3ec;  --tint-codex-border: #d3e4d8;
-    --tint-grok: #ecedf4;   --tint-grok-border: #d6d8e6;
-    --sans: 'Figtree', ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --bg: #11100e;
+    --ink: #efece6;
+    --muted: #b3ada3;
+    --line: #262420;
+    --card: #191815;
+    --tile: #1d1c19;
+    --tile-line: #2e2c27;
+    --warn: #f0b35e;
+    --high: #f2826f;
+    --sans: Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   }
 
   html, body {
     width: 420px;
-    height: 100%;
-    background: var(--paper);
+    background: var(--bg);
     color: var(--ink);
     font-family: var(--sans);
+    font-weight: 500;
     font-size: 13px;
+    line-height: 1.5;
+    letter-spacing: -.011em;
+    font-feature-settings: 'cv11', 'ss03';
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
   }
+  svg { display: block; flex-shrink: 0; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 10;
-    opacity: 0.06;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-    background-size: 160px 160px;
+  /* Title bar: Windows draws its own min/close buttons over the right side */
+  .titlebar {
+    height: 40px; display: flex; align-items: center; padding: 0 20px;
+    font-size: 14px; font-weight: 600; -webkit-app-region: drag;
   }
 
-  .app {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    padding: 18px 20px 16px;
-    gap: 16px;
+  .app { display: flex; flex-direction: column; gap: 22px; padding: 6px 20px 20px; }
+
+  h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
+
+  .list { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; min-height: 56px; }
+  .row + .row { border-top: 1px solid var(--line); }
+  .row-main { flex: 1; min-width: 0; }
+  .row-name { font-size: 14px; font-weight: 600; line-height: 1.35; }
+  .row-text { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-text.bad { color: var(--high); }
+  .row-text.stale { color: var(--warn); }
+
+  .link-btn {
+    display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
+    height: 30px; padding: 0 12px; border-radius: 15px;
+    background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 600;
+    transition: background-color .2s ease, transform .15s ease;
   }
+  .link-btn:hover { background: #fff; }
+  .link-btn:active { transform: scale(.97); }
+  .link-btn svg { width: 14px; height: 14px; }
 
-  .title {
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.03em;
-    line-height: 1;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border);
+  /* Switch */
+  .switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
+  .switch input { position: absolute; inset: 0; opacity: 0; cursor: pointer; margin: 0; }
+  .switch i {
+    position: absolute; inset: 0; border-radius: 11px; background: var(--tile-line); pointer-events: none;
+    transition: background-color .2s ease;
   }
-  .title em { font-style: normal; color: var(--blue); }
-  .title small { font-size: 11px; font-weight: 500; color: var(--muted); margin-left: 8px; letter-spacing: 0; }
-
-  .section { display: flex; flex-direction: column; gap: 6px; }
-
-  .eyebrow {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--muted);
+  .switch i::after {
+    content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--muted); transition: transform .2s cubic-bezier(.2, .8, .2, 1), background-color .2s ease;
   }
-  .eyebrow span { text-transform: none; font-weight: 400; letter-spacing: 0; }
+  .switch input:checked + i { background: var(--ink); }
+  .switch input:checked + i::after { transform: translateX(16px); background: var(--bg); }
+  .switch input:focus-visible + i { outline: 2px solid var(--ink); outline-offset: 2px; }
 
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 0;
-    padding: 9px 12px;
-  }
-  .row + .row { margin-top: 4px; }
-
-  .row[data-provider="claude"] { background: var(--tint-claude); border-color: var(--tint-claude-border); }
-  .row[data-provider="codex"]  { background: var(--tint-codex);  border-color: var(--tint-codex-border); }
-  .row[data-provider="grok"]   { background: var(--tint-grok);   border-color: var(--tint-grok-border); }
-  .row-text.missing { color: var(--red); }
-  .row-text.stale { color: var(--amber); }
-
-  .row-name { font-size: 12.5px; font-weight: 500; color: var(--ink); width: 110px; flex-shrink: 0; }
-  .row-text {
-    font-size: 11.5px;
-    color: var(--muted);
-    line-height: 1.4;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .toggle { accent-color: var(--sapphire); cursor: pointer; flex-shrink: 0; }
-
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .field-row { display: flex; gap: 8px; align-items: center; }
   input[type=text] {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 0;
-    color: var(--ink);
-    font-family: var(--sans);
-    font-size: 12px;
-    padding: 8px 10px;
-    outline: none;
-    width: 100%;
+    flex: 1; min-width: 0; height: 36px; padding: 0 12px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    color: var(--ink); font: inherit; outline: none;
+    transition: border-color .2s ease;
   }
-  input[type=text]:focus { border-color: var(--blue); }
-  input[type=text]::placeholder { color: var(--muted); }
+  input[type=text]:hover { border-color: var(--tile-line); }
+  input[type=text]:focus { border-color: var(--muted); }
+  input[type=text]::placeholder { color: var(--muted); opacity: .75; }
 
-  .hint { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
-  .hint a { color: var(--blue); text-decoration: none; cursor: pointer; }
-  .hint a:hover { text-decoration: underline; }
-  .hint code { font-size: 11px; color: var(--ink); }
+  .hint { font-size: 13px; color: var(--muted); line-height: 1.5; margin-top: 8px; }
   .hint.ok { color: var(--ink); }
-  .hint.bad { color: var(--red); }
+  .hint.bad { color: var(--high); }
+  .hint a { color: var(--ink); font-weight: 600; text-decoration: underline; text-decoration-color: var(--tile-line);
+    text-decoration-thickness: 1.5px; text-underline-offset: 3px; cursor: pointer; transition: text-decoration-color .2s ease; }
+  .hint a:hover { text-decoration-color: var(--ink); }
 
-  .actions { display: flex; gap: 6px; margin-top: auto; align-items: center; }
-  .status { font-size: 11.5px; color: var(--muted); flex: 1; }
-  .status.success { color: var(--ink); }
-
-  .btn {
-    font-family: var(--sans);
-    font-size: 12.5px;
-    font-weight: 500;
-    border-radius: 0;
-    padding: 7px 14px;
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: background 0.12s, border-color 0.12s;
-  }
-  .btn-primary { background: var(--sapphire); color: #fff; border-color: var(--sapphire); }
-  .btn-primary:hover { background: #1a3894; }
-  .btn-secondary { background: var(--panel); color: var(--ink); border-color: var(--border); }
-  .btn-secondary:hover { border-color: var(--ink); }
+  .saved { position: fixed; right: 20px; bottom: 16px; font-size: 13px; color: var(--muted);
+    opacity: 0; transition: opacity .3s ease; }
+  .saved.on { opacity: 1; }
 </style>
 </head>
 <body>
+<div class="titlebar">Settings</div>
 <div class="app">
-  <div class="title">ai<em>.</em>tray <small>settings</small></div>
-
-  <div class="section">
-    <div class="eyebrow">Claude Max</div>
-    <div class="row" data-provider="claude">
-      <div class="row-name">Claude Code</div>
-      <div class="row-text" id="oauthText">Checking…</div>
+  <section>
+    <h2>Services</h2>
+    <div class="list">
+      <div class="row" data-provider="claude">
+        <div class="row-main">
+          <div class="row-name">Claude Max</div>
+          <div class="row-text" id="text-claude">Checking…</div>
+        </div>
+        <span id="action-claude"></span>
+      </div>
+      <div class="row" data-provider="codex">
+        <div class="row-main">
+          <div class="row-name">ChatGPT / Codex</div>
+          <div class="row-text" id="text-codex">Checking…</div>
+        </div>
+        <span id="action-codex"></span>
+        <label class="switch" title="Show in AI Tray"><input type="checkbox" id="toggle-codex"><i></i></label>
+      </div>
+      <div class="row" data-provider="grok">
+        <div class="row-main">
+          <div class="row-name">Grok</div>
+          <div class="row-text" id="text-grok">Checking…</div>
+        </div>
+        <span id="action-grok"></span>
+        <label class="switch" title="Show in AI Tray"><input type="checkbox" id="toggle-grok"><i></i></label>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div class="section">
-    <div class="eyebrow">Extra providers</div>
-    <div class="row" data-provider="codex">
-      <div class="row-name">ChatGPT / Codex</div>
-      <div class="row-text" id="text-codex">Checking…</div>
-      <input class="toggle" type="checkbox" id="toggle-codex" title="Enable">
+  <section class="field">
+    <h2>Win-CodexBar</h2>
+    <div class="field-row">
+      <input type="text" id="codexbarPath" placeholder="Found automatically" spellcheck="false">
     </div>
-    <div class="row" data-provider="grok">
-      <div class="row-name">Grok</div>
-      <div class="row-text" id="text-grok">Checking…</div>
-      <input class="toggle" type="checkbox" id="toggle-grok" title="Enable">
-    </div>
-    <div class="hint">Read through <a id="codexbarLink">Win-CodexBar</a>'s <code>codexbar-cli.exe</code> from the tokens saved by <code>codex login</code> and <code>grok login</code>.</div>
-  </div>
-
-  <div class="section">
-    <div class="eyebrow">codexbar-cli.exe path <span>(optional)</span></div>
-    <input type="text" id="codexbarPath" placeholder="Auto-detect (bin\codexbar-cli.exe)">
     <div class="hint" id="cliStatus"></div>
-  </div>
-
-  <div class="actions">
-    <span class="status" id="status"></span>
-    <button class="btn btn-secondary" id="cancelBtn">Close</button>
-    <button class="btn btn-primary" id="saveBtn">Save &amp; refresh</button>
-  </div>
+  </section>
 </div>
+<div class="saved" id="saved">Saved</div>
 
 <script>
   const PROVIDER_IDS = ['codex', 'grok'];
+  const LOGIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12h-7m0 0 3 3m-3-3 3-3"/><path d="M19 6V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"/></svg>';
+  const RELEASES = 'https://github.com/nesszer/Win-CodexBar/releases';
 
-  function renderClaudeStatus(data) {
-    const txt = document.getElementById('oauthText');
-    const cu = data && data.claudeUsage;
-    if (cu && !cu.error) {
-      txt.className = 'row-text' + (cu.staleError ? ' stale' : '');
-      txt.textContent = cu.staleError ? `Stale — ${cu.staleError}` : 'Credentials found — syncing automatically.';
-    } else {
-      txt.className = 'row-text missing';
-      txt.textContent = (cu && cu.error) || 'Not found';
-    }
-    txt.title = txt.textContent;
+  function setRow(id, text, cls, action) {
+    const t = document.getElementById(`text-${id}`);
+    t.textContent = text;
+    t.className = 'row-text' + (cls ? ' ' + cls : '');
+    t.title = text;
+    document.getElementById(`action-${id}`).innerHTML = action === 'login'
+      ? `<button class="link-btn" data-login="${id}">${LOGIN_ICON}<span>Sign in</span></button>` : '';
   }
 
-  function renderProviderStatus(data) {
+  function render(data) {
+    const cu = data && data.claudeUsage;
+    if (!cu) setRow('claude', 'Checking…');
+    else if (cu.error && /expired|401|re-authenticate/i.test(cu.error)) setRow('claude', 'Signed out', 'bad', 'login');
+    else if (cu.error && /No Claude OAuth token/i.test(cu.error)) setRow('claude', 'Claude Code isn’t signed in', 'bad');
+    else if (cu.error) setRow('claude', 'Can’t connect right now', 'bad');
+    else if (cu.staleError) setRow('claude', 'Connected, last update failed', 'stale');
+    else setRow('claude', 'Connected');
+
     for (const id of PROVIDER_IDS) {
-      const txt = document.getElementById(`text-${id}`);
-      txt.className = 'row-text';
       const enabled = data?.enabledProviders?.[id];
       const pu = data?.providers?.[id];
-      if (!enabled) {
-        txt.textContent = 'Disabled';
-      } else if (!pu) {
-        txt.textContent = 'Not fetched yet';
-      } else if (pu.error) {
-        txt.className = 'row-text missing';
-        txt.textContent = pu.error;
-      } else if (pu.staleError) {
-        txt.className = 'row-text stale';
-        txt.textContent = `Stale — ${pu.staleError}`;
-      } else {
-        txt.textContent = [pu.plan, pu.email].filter(Boolean).join(' · ') || 'Connected';
-      }
-      txt.title = txt.textContent;
+      if (!enabled) setRow(id, 'Hidden');
+      else if (!pu) setRow(id, 'Checking…');
+      else if (pu.cliMissing) setRow(id, 'Needs Win-CodexBar', 'bad');
+      else if (pu.needsLogin) setRow(id, 'Signed out', 'bad', 'login');
+      else if (pu.error) setRow(id, 'Can’t connect right now', 'bad');
+      else if (pu.staleError) setRow(id, 'Connected, last update failed', 'stale');
+      else setRow(id, pu.plan ? `Connected · ${pu.plan}` : 'Connected');
     }
+
     const cli = document.getElementById('cliStatus');
     if (data && 'cliFound' in data) {
-      cli.textContent = data.cliFound
-        ? 'codexbar-cli.exe found.'
-        : 'codexbar-cli.exe not found — download CodexBarCLI from the Win-CodexBar releases page into the app\'s bin\\ folder, or set the path above.';
-      cli.className = 'hint ' + (data.cliFound ? 'ok' : 'bad');
+      cli.className = 'hint' + (data.cliFound ? '' : ' bad');
+      cli.innerHTML = data.cliFound
+        ? 'Reads ChatGPT and Grok usage. Found and working.'
+        : `Not found. <a id="getCli">Download Win-CodexBar</a> and point this at codexbar-cli.exe.`;
+      const a = document.getElementById('getCli');
+      if (a) a.addEventListener('click', () => window.ai.openExternal(RELEASES));
     }
+
+    document.querySelectorAll('[data-login]').forEach(btn => btn.addEventListener('click', async () => {
+      const id = btn.dataset.login;
+      btn.disabled = true;
+      btn.querySelector('span').textContent = 'Waiting…';
+      const r = id === 'claude' ? await window.ai.reAuthenticate() : await window.ai.providerLogin(id);
+      if (!r || !r.success) { btn.disabled = false; btn.querySelector('span').textContent = 'Sign in'; }
+    }));
   }
 
-  async function loadSettings() {
-    const config = await window.ai.getConfig();
-    document.getElementById('codexbarPath').value = config.codexbarPath || '';
-    for (const id of PROVIDER_IDS) {
-      document.getElementById(`toggle-${id}`).checked = !!(config.providers && config.providers[id]);
-    }
-    const data = await window.ai.getData();
-    renderClaudeStatus(data);
-    renderProviderStatus(data);
-  }
-
-  document.getElementById('saveBtn').addEventListener('click', async () => {
-    const status = document.getElementById('status');
+  // Changes save as you make them
+  let savedTimer = null;
+  async function save() {
     const config = await window.ai.getConfig();
     config.codexbarPath = document.getElementById('codexbarPath').value.trim();
     config.providers = config.providers || {};
-    for (const id of PROVIDER_IDS) {
-      config.providers[id] = document.getElementById(`toggle-${id}`).checked;
-    }
-    status.className = 'status';
-    status.textContent = 'Saving & refreshing…';
+    for (const id of PROVIDER_IDS) config.providers[id] = document.getElementById(`toggle-${id}`).checked;
     await window.ai.saveConfig(config);
-    status.className = 'status success';
-    status.textContent = 'Saved.';
-    const data = await window.ai.getData();
-    renderClaudeStatus(data);
-    renderProviderStatus(data);
-  });
+    const s = document.getElementById('saved');
+    s.classList.add('on');
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(() => s.classList.remove('on'), 1600);
+    render(await window.ai.getData());
+  }
 
-  document.getElementById('codexbarLink').addEventListener('click', () => {
-    window.ai.openExternal('https://github.com/nesszer/Win-CodexBar/releases');
-  });
+  for (const id of PROVIDER_IDS) document.getElementById(`toggle-${id}`).addEventListener('change', save);
+  const pathInput = document.getElementById('codexbarPath');
+  pathInput.addEventListener('change', save);
+  pathInput.addEventListener('keydown', e => { if (e.key === 'Enter') pathInput.blur(); });
 
-  document.getElementById('cancelBtn').addEventListener('click', () => window.close());
+  window.ai.onDataUpdate(render);
 
-  loadSettings();
+  (async () => {
+    const config = await window.ai.getConfig();
+    pathInput.value = config.codexbarPath || '';
+    for (const id of PROVIDER_IDS) document.getElementById(`toggle-${id}`).checked = !!(config.providers && config.providers[id]);
+    render(await window.ai.getData());
+  })();
 </script>
 </body>
 </html>
