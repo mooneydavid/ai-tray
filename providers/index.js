@@ -1,6 +1,6 @@
 // The optional providers shown next to Claude. Each reads the login its own CLI saves.
 
-const { execFile } = require('child_process');
+const { exec } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -42,11 +42,12 @@ async function fetchAll(enabled, opts = {}) {
 function launchLogin(id) {
   const def = PROVIDERS[id];
   if (!def) return Promise.resolve({ success: false, error: 'Unknown provider' });
-  // Prefer the installer's known location; fall back to PATH lookup via shell
+  // Prefer the installer's known location; fall back to PATH lookup via shell. The command is
+  // built only from the constants above, never from anything the popup sends.
   const exe = (def.loginPaths || []).find(p => { try { return fs.existsSync(p); } catch (e) { return false; } });
   const cmd = exe ? `"${exe}"` : def.loginCmd;
   return new Promise((resolve) => {
-    const child = execFile(cmd, def.loginArgs, { shell: true, timeout: 300000 }, (err) => {
+    const child = exec([cmd, ...def.loginArgs].join(' '), { timeout: 300000 }, (err) => {
       if (err) resolve({ success: false, error: err.message });
       else resolve({ success: true });
     });

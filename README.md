@@ -48,13 +48,15 @@ Everything runs on your PC. There's no server, no account and no analytics.
 
 | Service | Login it reads | Where it asks |
 | --- | --- | --- |
-| Claude | `~\.claude\.credentials.json` (Claude Code) | `api.anthropic.com`, and `platform.claude.com` to renew an expired login |
+| Claude | `~\.claude\.credentials.json` (Claude Code) | `api.anthropic.com` |
 | ChatGPT / Codex | `~\.codex\auth.json` (Codex CLI) | `chatgpt.com` |
 | Grok | `~\.grok\auth.json` (Grok CLI) | `cli-chat-proxy.grok.com`, and `auth.x.ai` to renew its 6-hour login |
 
 Good to know:
 
-- When a Claude or Grok login has expired, AI Tray renews it and saves the new one back to that tool's login file, so the CLI keeps working too. It won't overwrite a Claude login that Claude Code renewed in the meantime. ChatGPT logins are only read, never changed; open Codex every week or so to keep it signed in.
+- AI Tray never changes your Claude login. When it runs out, AI Tray starts Claude Code for a moment (`claude -p` with nothing to ask) and Claude Code renews its own login. Nothing is sent to Claude, so it uses none of your usage.
+- Grok's login lasts 6 hours, so AI Tray renews it itself and saves it back to `~.grokauth.json`, so the Grok CLI keeps working too. It never overwrites a login the Grok CLI saved in the meantime.
+- ChatGPT logins are only read, never changed. Open Codex every week or so to keep it signed in.
 - AI Tray keeps a few small files in `%APPDATA%\ai-tray`: your settings, the last numbers it fetched (so it can show them straight away after a restart), and `ai-tray.log`, a short record of each refresh that's useful if you report a bug. The log never contains logins or tokens, and your Windows user folder shows as `~`.
 - If you've pointed the Codex CLI at another ChatGPT address (`chatgpt_base_url` in `~.codexconfig.toml`) or the Grok CLI at another sign-in server, AI Tray follows that setting, as the CLIs do.
 - It uses the same usage endpoints the official tools use. They aren't public APIs and could change without notice.

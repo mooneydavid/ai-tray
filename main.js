@@ -1,11 +1,10 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, Notification, powerMonitor, screen } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
 const extras = require('./providers');  // ChatGPT / Codex and Grok
-const { writeFileAtomic } = require('./providers/write-file');
 
 // `npm start` runs get their own data folder, so a dev copy never collides with (or quits
 // in favour of) the installed app, and never touches its settings.
@@ -114,73 +113,32 @@ function loadClaudeCredentials() {
   return null;
 }
 
-// Save a refreshed login back to Claude Code's credentials file. Claude Code shares this
-// file, so re-read it first: if its refresh token is no longer the one we used, Claude Code
-// rotated it in the meantime and its copy wins. Written atomically (tmp + rename) so Claude
-// Code never reads a half-written file.
-function saveClaudeTokens(filePath, usedRefreshToken, tokens) {
-  try {
-    const current = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    const oauth = current.claudeAiOauth || {};
-    const onDisk = oauth.refreshToken || oauth.refresh_token;
-    if (onDisk && onDisk !== usedRefreshToken) {
-      console.log('Claude Code updated its login meanwhile; leaving its file alone.');
-      return;
-    }
-    current.claudeAiOauth = { ...oauth, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresAt: tokens.expiresAt };
-    suppressWatcherBriefly();
-    writeFileAtomic(filePath, JSON.stringify(current, null, 2));
-  } catch (e) {
-    console.error('Failed to save refreshed credentials:', e.message);
-  }
-}
-
-
-// Ignore file-watcher events caused by our own credential writes
+// Ignore file-watcher events caused by our own credential writes (Grok's login file)
 function suppressWatcherBriefly() {
   suppressWatcher = true;
   clearTimeout(suppressWatcherBriefly.timer);
   suppressWatcherBriefly.timer = setTimeout(() => { suppressWatcher = false; }, 2000);
 }
 
-// A Claude refresh token the server turned down, so we don't keep asking with it
-let rejectedClaudeRefresh = null;
-
-// Claude Code's public OAuth client ID
-const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-
-// Refresh the access token directly via OAuth endpoint
-// Based on CodexBar's approach: POST https://platform.claude.com/v1/oauth/token
-async function refreshTokenDirect(refreshToken) {
-  try {
-    // Must use x-www-form-urlencoded (not JSON) per the OAuth spec
-    const params = new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-      client_id: CLAUDE_OAUTH_CLIENT_ID,
-    });
-    const body = params.toString();
-    const res = await httpsRequest(
-      'https://platform.claude.com/v1/oauth/token',
-      { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
-      { method: 'POST', body }
-    );
-    if (res.status === 200 && res.body.access_token) {
-      return {
-        accessToken: res.body.access_token,
-        refreshToken: res.body.refresh_token || refreshToken,
-        expiresAt: Date.now() + (res.body.expires_in || 28800) * 1000,
-      };
+// AI Tray never renews or writes Claude Code's login itself. When it runs out, it starts
+// Claude Code for a moment and lets Claude Code renew its own login, as CodexBar does.
+// `claude -p` with nothing to ask renews the login on startup, then stops with "Input must be
+// provided" before it sends anything, so no usage is spent.
+const RENEW_RETRY_MS = 15 * 60 * 1000;
+let lastRenewFail = null;  // { refreshToken, at } of the last attempt that didn't renew
+let renewing = null;
+function renewViaClaudeCode() {
+  if (renewing) return renewing;
+  renewing = new Promise((resolve) => {
+    try {
+      const child = exec('claude -p', { windowsHide: true, timeout: 30000 }, () => resolve());
+      if (child.stdin) child.stdin.end();  // nothing to ask
+    } catch (e) {
+      console.error('Could not start Claude Code:', e.message);
+      resolve();
     }
-    const reason = res.body && typeof res.body === 'object' ? (res.body.error_description || res.body.error || '') : '';
-    console.error('Direct token refresh failed:', res.status, reason);
-    // Turned down (revoked, or already used): never send this one again. A new sign-in replaces it.
-    if (res.status === 400 || res.status === 401) rejectedClaudeRefresh = refreshToken;
-    return null;
-  } catch (e) {
-    console.error('Direct token refresh error:', e.message);
-    return null;
-  }
+  }).finally(() => { renewing = null; });
+  return renewing;
 }
 
 function pick(obj, keys) {
@@ -197,43 +155,43 @@ function claudePlan() {
   return tier && type === 'max' ? `${name} ${tier[1]}` : name;
 }
 
-const EXPIRED = Symbol('expired');  // the login has run out and can't be renewed
+const EXPIRED = Symbol('expired');  // the login has run out and Claude Code couldn't renew it
 
-// Get a valid OAuth token, refreshing if expired (or if `force` is set after a 401).
-// The credentials file is re-read on every call, so a login Claude Code refreshed itself
-// is always picked up before we try to refresh anything.
+// Get a valid OAuth token, asking Claude Code to renew it if it has run out (or if `force` is
+// set after a 401). The credentials file is re-read on every call, so a login Claude Code
+// renewed on its own is always picked up first.
 async function getClaudeOAuthToken({ force = false } = {}) {
   const cred = loadClaudeCredentials();
   if (!cred) return null;
 
-  const { filePath, oauth } = cred;
+  const { oauth } = cred;
   const token = oauth.accessToken || oauth.access_token;
   const refreshTk = oauth.refreshToken || oauth.refresh_token;
   const expiresAt = oauth.expiresAt || oauth.expires_at;
+  const outOfDate = () => (expiresAt && Date.now() >= expiresAt ? EXPIRED : token || null);
 
   // Still valid (with 60s buffer)
   if (!force && token && expiresAt && Date.now() < expiresAt - 60000) {
     return token;
   }
   if (!refreshTk) return token || null;
-  // Already turned down: only a new sign-in (which writes a new refresh token) can help
-  if (refreshTk === rejectedClaudeRefresh) return expiresAt && Date.now() >= expiresAt ? EXPIRED : token || null;
-
-  console.log('OAuth token expired, refreshing...');
-  const refreshed = await refreshTokenDirect(refreshTk);
-  if (refreshed) {
-    console.log('Token refreshed.');
-    saveClaudeTokens(filePath, refreshTk, refreshed);
-    return refreshed.accessToken;
+  // Claude Code couldn't renew this same login a moment ago: wait for a new sign-in or the retry time
+  if (lastRenewFail && lastRenewFail.refreshToken === refreshTk && Date.now() - lastRenewFail.at < RENEW_RETRY_MS) {
+    return outOfDate();
   }
 
-  // Claude Code may have refreshed it while our request was in flight
+  console.log('Claude login has run out; asking Claude Code to renew it...');
+  await renewViaClaudeCode();
   const again = loadClaudeCredentials();
   const latest = again && (again.oauth.accessToken || again.oauth.access_token);
-  if (latest && latest !== token) return latest;
-
-  console.warn('Token refresh failed.');
-  return token || null;
+  if (latest && latest !== token) {
+    lastRenewFail = null;
+    console.log('Claude Code renewed its login.');
+    return latest;
+  }
+  lastRenewFail = { refreshToken: refreshTk, at: Date.now() };
+  console.warn('Claude Code did not renew its login.');
+  return outOfDate();
 }
 
 // Fetch Claude session + weekly usage via OAuth (with auto-retry on 401)
@@ -366,7 +324,7 @@ let refreshInterval = null;
 let refreshInFlight = null;         // Promise of the in-progress refreshData(), if any
 let refreshGeneration = 0;         // bumped per refresh, so an abandoned one can't overwrite a newer one
 const refreshPending = new Set();  // services the current refresh is still waiting on, for the log
-let suppressWatcher = false;  // Suppress watcher during our own credential writes
+let suppressWatcher = false;  // Suppress watcher during our own (Grok) credential writes
 let lastRateLimitedAt = 0;    // Cooldown after 429
 const CLAUDE_COOLDOWN_MS = 2 * 60 * 1000;
 const CLAUDE_REUSE_MS = 2 * 60 * 1000;

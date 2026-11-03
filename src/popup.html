@@ -384,7 +384,7 @@
       body = (pu.meters || []).map(renderMeter).join('') || '<div class="note">No usage data yet.</div>';
       if (pu.staleError) {
         stale = true;
-        note = `<div class="note warn"><b>From ${fmtTime(pu.staleSince)}.</b> ${escapeHtml(friendlyError(def, { staleError: pu.staleError }))}</div>`;
+        note = `<div class="note warn"><b>From ${fmtTime(pu.staleSince)}.</b> ${escapeHtml(friendlyError(def, { staleError: pu.staleError, needsLogin: pu.needsLogin }))}</div>`;
         if (pu.needsLogin) note += `<div class="action-row">${signInButton(def.id)}</div>`;
       }
       head = pu.plan || '';
