@@ -214,20 +214,11 @@ async function fetchClaudeUsage() {
       }
     }
 
-    // If 429, retry with backoff before giving up
+    // Rate limited: back off (the caller keeps the last numbers and waits out a cooldown).
+    // Retrying here would only ask again sooner and hold up the other providers.
     if (res.status === 429) {
-      console.log('Got 429 (rate limited), retrying in 5s...');
-      await new Promise(r => setTimeout(r, 5000));
-      res = await doFetch(token);
-      if (res.status === 429) {
-        console.log('Still 429 after first retry, retrying in 10s...');
-        await new Promise(r => setTimeout(r, 10000));
-        res = await doFetch(token);
-        if (res.status === 429) {
-          console.log('Still 429 after retries, will use cached data.');
-          return null;
-        }
-      }
+      console.log('Claude usage rate limited (429), keeping cached data.');
+      return null;
     }
 
     if (res.status === 401) return { error: 'OAuth token expired. Please re-authenticate.' };
@@ -324,6 +315,7 @@ let refreshInterval = null;
 let refreshInFlight = null;   // Promise of the in-progress refreshData(), if any
 let suppressWatcher = false;  // Suppress watcher during our own credential writes
 let lastRateLimitedAt = 0;    // Cooldown after 429
+const CLAUDE_COOLDOWN_MS = 2 * 60 * 1000;
 // Track which meters have already triggered an 80% notification (reset when they drop below)
 const notifiedAt80 = {};
 
@@ -388,7 +380,6 @@ function showPopup() {
   mainWindow.show();
   mainWindow.focus();
   // Always fetch fresh data when the popup opens
-  lastRateLimitedAt = 0;
   refreshData();
 }
 
@@ -493,20 +484,17 @@ function refreshData() {
   // Coalesce concurrent calls (watcher + polling timer + manual refresh) onto one fetch
   if (refreshInFlight) return refreshInFlight;
 
-  // Respect 429 cooldown — skip if rate limited within the last 60s
-  if (lastRateLimitedAt && Date.now() - lastRateLimitedAt < 60000) {
-    console.log('Skipping refresh, still in 429 cooldown.');
-    return Promise.resolve();
-  }
-
   refreshInFlight = doRefresh().finally(() => { refreshInFlight = null; });
   return refreshInFlight;
 }
 
 async function doRefresh() {
   const config = loadConfig();
+  // During a Claude rate-limit cooldown only Claude waits; the other providers still refresh,
+  // so a ChatGPT or Grok sign-in shows up straight away
+  const claudeCooling = lastRateLimitedAt && Date.now() - lastRateLimitedAt < CLAUDE_COOLDOWN_MS;
   const [claudeUsage, results] = await Promise.all([
-    fetchClaudeUsage(),
+    claudeCooling ? 'cooling' : fetchClaudeUsage(),
     extras.fetchAll(config.providers, {
       beforeCredentialWrite: suppressWatcherBriefly,
     }),
@@ -519,12 +507,11 @@ async function doRefresh() {
     providers[id] = merged;
   }
 
-  if (claudeUsage === null) {
-    // Rate limited (429) even after retry — keep the previous Claude data, update the rest
-    lastRateLimitedAt = Date.now();
+  if (claudeUsage === null || claudeUsage === 'cooling') {
+    // Rate limited (now or recently): keep the previous Claude data, update the rest
+    if (claudeUsage === null) lastRateLimitedAt = Date.now();
     const prevClaude = lastData?.claudeUsage || { error: 'Rate limited on startup. Will auto-refresh in a few minutes.' };
     lastData = { claudeUsage: prevClaude, providers, refreshedAt: new Date().toISOString() };
-    console.log('Claude rate limited — keeping cached Claude data.');
   } else {
     lastRateLimitedAt = 0;  // Clear cooldown on successful response
     const mergedClaude = mergeStale(lastData?.claudeUsage, claudeUsage, now);
@@ -655,7 +642,7 @@ app.whenReady().then(async () => {
   watchCredentials();
 
   // After sleep or a locked screen the numbers are stale: refresh once the network is back
-  const refreshSoon = () => setTimeout(() => { lastRateLimitedAt = 0; refreshData(); }, 5000);
+  const refreshSoon = () => setTimeout(() => refreshData(), 5000);
   powerMonitor.on('resume', refreshSoon);
   powerMonitor.on('unlock-screen', refreshSoon);
 
