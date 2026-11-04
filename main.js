@@ -333,7 +333,7 @@ const REFRESH_TIMEOUT_MS = 90 * 1000;
 const notifiedAt80 = {};
 
 function createTrayIcon() {
-  return nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png'));
+  return nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.ico'));
 }
 
 const BG = '#11100e';

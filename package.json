@@ -1,6 +1,6 @@
 {
   "name": "ai-tray",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Windows tray app showing your Claude, ChatGPT/Codex and Grok usage limits",
   "main": "main.js",
   "scripts": {
@@ -25,7 +25,8 @@
     "appId": "com.david.ai-tray",
     "productName": "AI Tray",
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/icon.ico"
     },
     "nsis": {
       "oneClick": true,

@@ -1,3 +1,5 @@
+<img src="assets/logo-256.png" alt="" width="96">
+
 # AI Tray
 
 A small Windows tray app that shows how much of your Claude, ChatGPT / Codex and Grok limits you've used, and whether you're on track to run out before they reset.
