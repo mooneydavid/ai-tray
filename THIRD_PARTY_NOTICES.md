@@ -36,3 +36,18 @@ SOFTWARE.
 
 The Inter typeface (`assets/fonts/Inter.woff2`) is by The Inter Project Authors and is licensed under the
 SIL Open Font License 1.1. The full licence is in `assets/fonts/Inter-LICENSE.txt`.
+
+## Anthropic TypeScript SDK
+
+The Claude API card (`providers/claude-api.js`) uses [`@anthropic-ai/sdk`](https://github.com/anthropics/anthropic-sdk-typescript)
+by Anthropic, PBC, licensed under the Apache License 2.0. Its licence files ship with it in the app
+(`node_modules/@anthropic-ai/sdk/LICENSE` and `LICENSE-MIT`).
+
+## Service logos
+
+The logos on the cards are the services' own marks, used only to show which service a card is for.
+Each brand's trademarks belong to its owner.
+
+- Claude, Anthropic and OpenAI marks: [Simple Icons](https://simpleicons.org), released under CC0 1.0.
+- Grok mark: [LobeHub Icons](https://github.com/lobehub/lobe-icons), MIT License, Copyright (c) 2023 LobeHub.
+  The MIT licence text is the same as the one quoted for Win-CodexBar above.

@@ -1,5 +1,5 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, Notification, powerMonitor, screen } = require('electron');
-const { spawn, exec } = require('child_process');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, Notification, powerMonitor, screen, safeStorage } = require('electron');
+const { spawn, exec, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -22,7 +22,9 @@ const logPath = path.join(app.getPath('userData'), 'ai-tray.log');
 for (const level of ['log', 'warn', 'error']) {
   const original = console[level].bind(console);
   console[level] = (...args) => {
-    original(...args);
+    // Printing is optional (there's usually no console attached); logging must never throw
+    // into whatever called it, or one log line could abort a refresh.
+    try { original(...args); } catch (e) {}
     try {
       if (fs.existsSync(logPath) && fs.statSync(logPath).size > 256 * 1024) fs.renameSync(logPath, logPath + '.old');
       const text = args.map(a => (a instanceof Error ? a.stack : typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ').split(os.homedir()).join('~');
@@ -34,9 +36,14 @@ process.on('unhandledRejection', (e) => console.error('Unhandled rejection:', e)
 process.on('uncaughtException', (e) => console.error('Uncaught exception:', e));
 
 const DEFAULT_CONFIG = {
-  providers: { codex: true, grok: true }, // optional providers shown next to Claude
+  providers: { api: false, codex: true, grok: true }, // optional cards; api turns on once a key is saved
+  apiBudget: 100,                         // Claude API monthly budget in USD
   openAtLogin: true,                      // installed build only
 };
+
+function validBudget(n) {
+  return typeof n === 'number' && isFinite(n) && n > 0 && n <= 1e6;
+}
 
 function loadConfig() {
   try {
@@ -45,11 +52,47 @@ function loadConfig() {
       // Known settings only, so keys left by older versions drop out on the next save
       return {
         providers: { ...DEFAULT_CONFIG.providers, ...(saved.providers || {}) },
+        apiBudget: validBudget(saved.apiBudget) ? saved.apiBudget : DEFAULT_CONFIG.apiBudget,
         openAtLogin: typeof saved.openAtLogin === 'boolean' ? saved.openAtLogin : DEFAULT_CONFIG.openAtLogin,
       };
     }
   } catch (e) {}
   return { ...DEFAULT_CONFIG, providers: { ...DEFAULT_CONFIG.providers } };
+}
+
+// The Claude API admin key, encrypted with Windows' per-user encryption (DPAPI via safeStorage).
+// It's only ever decrypted in this process, never sent to the popup or written to the log.
+const apiKeyPath = path.join(app.getPath('userData'), 'claude-api-key.bin');
+async function loadApiKey() {
+  try {
+    if (!fs.existsSync(apiKeyPath) || !(await safeStorage.isAsyncEncryptionAvailable())) return null;
+    const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(fs.readFileSync(apiKeyPath));
+    // Windows rotated its encryption key: save the key again under the new one
+    if (shouldReEncrypt) await saveApiKey(result);
+    return result;
+  } catch (e) {
+    console.error('Could not read the saved Claude API key:', e.message);
+    return null;
+  }
+}
+async function saveApiKey(key) {
+  fs.writeFileSync(apiKeyPath, await safeStorage.encryptStringAsync(key));
+  await restrictToUser(apiKeyPath);
+}
+// The encrypted file inherits AppData's permissions, which on some PCs include sandboxed tools'
+// groups. Limit it to this Windows user and SYSTEM. Encryption is the real lock; this is extra.
+function restrictToUser(filePath) {
+  return new Promise((resolve) => {
+    execFile('icacls', [filePath, '/inheritance:r', '/grant:r', `${os.userInfo().username}:F`, '/grant:r', '*S-1-5-18:F'],
+      { windowsHide: true, timeout: 10000 }, (err) => {
+        if (err) console.warn('Could not restrict the Claude API key file to this user:', err.message);
+        resolve();
+      });
+  });
+}
+async function apiKeyInfo() {
+  const key = await loadApiKey();
+  return key ? { saved: true, ending: key.slice(-4) } : { saved: false };
 }
 
 function saveConfig(config) {
@@ -441,7 +484,7 @@ function checkUsageNotifications(lastData) {
     if (!pu || pu.error) continue;
     const name = extras.PROVIDERS[id]?.label || id;
     for (const m of pu.meters || []) {
-      checks.push({ key: `${id}:${m.key}`, pct: m.utilization, label: `${name} ${m.label}` });
+      checks.push({ key: `${id}:${m.key}`, pct: m.utilization, label: m.alertLabel || `${name} ${m.label}` });
     }
   }
 
@@ -504,11 +547,14 @@ async function doRefresh(force, generation) {
   refreshPending.clear();
   refreshPending.add('claude');
   for (const id of Object.keys(config.providers || {})) if (config.providers[id]) refreshPending.add(id);
+  const claudeApiKey = config.providers.api ? await loadApiKey() : null;
   const [claudeUsage, results] = await Promise.all([
     (claudeRecent ? Promise.resolve('recent') : claudeCooling ? Promise.resolve('cooling') : fetchClaudeUsage())
       .finally(() => generation === refreshGeneration && refreshPending.delete('claude')),
     extras.fetchAll(config.providers, {
       beforeCredentialWrite: suppressWatcherBriefly,
+      claudeApiKey,
+      claudeApiBudget: config.apiBudget,
       onDone: (id) => generation === refreshGeneration && refreshPending.delete(id),
     }),
   ]);
@@ -558,7 +604,7 @@ async function doRefresh(force, generation) {
     if (cu && cu.session) parts.push(`Claude: ${Math.round(cu.session.utilization)}%`);
     for (const [id, pu] of Object.entries(providers)) {
       const first = pu && pu.meters && pu.meters[0];
-      if (first) parts.push(`${extras.PROVIDERS[id].label}: ${Math.round(first.utilization)}%`);
+      if (first) parts.push(`${extras.PROVIDERS[id].label}: ${first.valueText || Math.round(first.utilization) + '%'}`);
     }
     tray.setToolTip(parts.length ? `${TRAY_NAME} | ${parts.join(' | ')}` : TRAY_NAME);
   }
@@ -619,6 +665,7 @@ app.whenReady().then(async () => {
     const sent = (incoming && incoming.providers) || {};
     for (const id of Object.keys(extras.PROVIDERS)) if (typeof sent[id] === 'boolean') config.providers[id] = sent[id];
     if (incoming && typeof incoming.openAtLogin === 'boolean') config.openAtLogin = incoming.openAtLogin;
+    if (incoming && validBudget(incoming.apiBudget)) config.apiBudget = incoming.apiBudget;
     saveConfig(config);
     // Show or hide cards straight away, even if a refresh is skipped during a rate-limit cooldown
     if (lastData) {
@@ -647,6 +694,44 @@ app.whenReady().then(async () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.hide();
     }
+  });
+  ipcMain.handle('get-api-key-info', () => apiKeyInfo());
+  // The popup sends the key once; it's checked with Anthropic, then saved encrypted
+  ipcMain.handle('set-api-key', async (_, raw) => {
+    const key = String(raw || '').trim();
+    // Logs why a key was turned down, with only the key's public prefix (e.g. "sk-ant-admin01")
+    const refuse = (error, detail = '') => {
+      console.warn(`Claude API key not saved (${(key.match(/^sk-ant-[a-z]+\d*/) || ['unrecognised format'])[0]}, ${key.length} chars): ${error}${detail}`);
+      return { ok: false, error };
+    };
+    if (!key) return refuse('Paste your admin key first.');
+    if (/^sk-ant-api/.test(key)) return refuse('That’s a regular API key. AI Tray needs an admin key, which starts with sk-ant-admin.');
+    if (!/^sk-ant-admin/.test(key)) return refuse('That doesn’t look like an admin key. They start with sk-ant-admin.');
+    if (!(await safeStorage.isAsyncEncryptionAvailable())) return refuse('Windows can’t encrypt the key right now, so it wasn’t saved.');
+    const check = await extras.checkApiKey(key);
+    if (!check.ok) return refuse(check.error, check.status ? ` (HTTP ${check.status})` : '');
+    await saveApiKey(key);
+    const config = loadConfig();
+    config.providers.api = true;
+    saveConfig(config);
+    console.log('Claude API admin key saved.');
+    if (lastData) lastData.enabledProviders = config.providers;
+    Promise.resolve(refreshInFlight).finally(() => refreshData());
+    return { ok: true, ...(await apiKeyInfo()) };
+  });
+  ipcMain.handle('remove-api-key', async () => {
+    try { if (fs.existsSync(apiKeyPath)) fs.unlinkSync(apiKeyPath); } catch (e) { console.error('Could not remove the Claude API key:', e.message); }
+    const config = loadConfig();
+    config.providers.api = false;
+    saveConfig(config);
+    console.log('Claude API admin key removed.');
+    if (lastData) {
+      lastData.enabledProviders = config.providers;
+      if (lastData.providers) delete lastData.providers.api;
+      try { fs.writeFileSync(cachePath, JSON.stringify(lastData)); } catch (e) {}
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('data-update', lastData);
+    }
+    return await apiKeyInfo();
   });
   ipcMain.handle('re-authenticate', () => launchReAuth());
   ipcMain.handle('provider-login', async (_, id) => {

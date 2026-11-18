@@ -7,8 +7,14 @@ const path = require('path');
 const chatgpt = require('./chatgpt');
 const grok = require('./grok');
 const grokAuth = require('./grok-auth');
+const claudeApi = require('./claude-api');
 
 const PROVIDERS = {
+  // Signs in with an admin key entered in Settings (stored by main.js), not a CLI login
+  api: {
+    label: 'Claude API',
+    fetch: claudeApi.fetchUsage,
+  },
   codex: {
     label: 'ChatGPT / Codex',
     authFile: chatgpt.authPath(),
@@ -30,7 +36,10 @@ const PROVIDERS = {
 // Fetch all enabled providers in parallel
 async function fetchAll(enabled, opts = {}) {
   const ids = Object.keys(PROVIDERS).filter(id => enabled[id]);
-  const settled = await Promise.all(ids.map(id => PROVIDERS[id].fetch(opts)
+  // The Claude API admin key goes to the Claude API reader only, never to the other providers
+  const { claudeApiKey, claudeApiBudget, ...shared } = opts;
+  const optsFor = (id) => (id === 'api' ? opts : shared);
+  const settled = await Promise.all(ids.map(id => PROVIDERS[id].fetch(optsFor(id))
     .catch(e => ({ error: String(e.message).split(os.homedir()).join('~') }))
     .finally(() => opts.onDone && opts.onDone(id))));
   const results = {};
@@ -41,7 +50,7 @@ async function fetchAll(enabled, opts = {}) {
 // Spawn the provider's own CLI login (opens a browser), resolve when it exits
 function launchLogin(id) {
   const def = PROVIDERS[id];
-  if (!def) return Promise.resolve({ success: false, error: 'Unknown provider' });
+  if (!def || !def.loginCmd) return Promise.resolve({ success: false, error: 'Unknown provider' });
   // Prefer the installer's known location; fall back to PATH lookup via shell. The command is
   // built only from the constants above, never from anything the popup sends.
   const exe = (def.loginPaths || []).find(p => { try { return fs.existsSync(p); } catch (e) { return false; } });
@@ -55,4 +64,4 @@ function launchLogin(id) {
   });
 }
 
-module.exports = { PROVIDERS, fetchAll, launchLogin };
+module.exports = { PROVIDERS, fetchAll, launchLogin, checkApiKey: claudeApi.checkKey };
