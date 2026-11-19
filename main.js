@@ -385,6 +385,37 @@ let popupMoved = false;     // user dragged the popup away from the tray: keep i
 let popupOrigin = null;     // where we last placed it, to detect a drag
 let popupHiddenAt = 0;      // when blur last hid it, so a click on the tray icon closes instead of reopening
 
+// Windows 11 draws an edge round every window, in the accent colour when "Show accent colour on
+// title bars and window borders" is on. Windows' own panels by the clock don't get that, so give
+// the popup a dark edge like theirs. Windows resets it whenever the window is shown, so it's set
+// again on every show. Windows 10 doesn't support this and keeps its normal edge.
+const POPUP_EDGE = 0x00272c2e;  // #2e2c27, written the way Windows wants it (blue, green, red)
+function setPopupEdge(win) {
+  if (process.platform !== 'win32') return;
+  let setAttribute, hwnd;
+  try {
+    const koffi = require('koffi');
+    setAttribute = koffi.load('dwmapi.dll').func(
+      'long __stdcall DwmSetWindowAttribute(intptr_t hwnd, uint32_t attribute, const uint32_t *value, uint32_t size)');
+    const handle = win.getNativeWindowHandle();
+    hwnd = handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE());
+  } catch (e) {
+    return console.warn('Could not set the popup edge colour:', e.message);
+  }
+  const DWMWA_BORDER_COLOR = 34;
+  let reported = false;
+  const apply = () => {
+    try {
+      const result = setAttribute(hwnd, DWMWA_BORDER_COLOR, [POPUP_EDGE], 4);
+      if (result !== 0 && !reported) { reported = true; console.log('Popup edge colour not supported here:', (result >>> 0).toString(16)); }
+    } catch (e) {
+      if (!reported) { reported = true; console.warn('Could not set the popup edge colour:', e.message); }
+    }
+  };
+  win.on('show', apply);
+  win.on('focus', apply);
+}
+
 // The popup is created hidden at startup so the first click opens it instantly at the right size
 function createMainWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
@@ -406,6 +437,7 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
+  setPopupEdge(mainWindow);
 
   // The popup only ever shows its own page: no navigating away (a file dropped on it, say), no new windows
   mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());

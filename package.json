@@ -42,6 +42,7 @@
     ]
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.10.0"
+    "@anthropic-ai/sdk": "^1.10.0",
+    "koffi": "3.3.6"
   }
 }
