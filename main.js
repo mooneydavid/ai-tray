@@ -777,8 +777,11 @@ app.whenReady().then(async () => {
   // Popup reports its content height so the window fits however many cards are shown
   ipcMain.on('set-height', (_, height) => {
     if (!mainWindow || mainWindow.isDestroyed() || !Number.isFinite(height)) return;
-    const h = Math.max(120, Math.min(900, Math.round(height)));
     const b = mainWindow.getBounds();
+    // Never taller than the screen it's on (8px clear top and bottom): on a short screen the
+    // header would otherwise sit above the top edge. The popup scrolls instead.
+    const area = screen.getDisplayMatching(popupMoved || !tray ? b : tray.getBounds()).workArea;
+    const h = Math.max(120, Math.min(900, area.height - 16, Math.round(height)));
     if (Math.abs(b.height - h) < 2) return;
     if (popupMoved || !tray) mainWindow.setBounds({ ...b, height: h });  // the user placed it; don't snap it back
     else positionWindowNearTray(h);

@@ -22,14 +22,16 @@
     --track: #312e29;
     --warn: #f0b35e;
     --high: #f2826f;
+    --tip: #2a2823;
+    --tip-line: #3a3731;
     --sans: Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
     --ease-icon: cubic-bezier(0.2, 0, 0, 1);
   }
 
   html, body {
-    width: 340px;
-    overflow: hidden;
+    width: 100%; max-width: 340px;
+    overflow-x: hidden;
     background: var(--bg);
     color: var(--ink);
     font-family: var(--sans);
@@ -42,6 +44,18 @@
     user-select: none;
     cursor: default;
   }
+  /* The window is as tall as the content, but never taller than the screen (main.js). When the
+     screen is shorter, the popup scrolls instead of cutting off. The scrollbar's room on the right
+     is kept at all times (and taken off the views' right padding), so the layout is the same width
+     whether or not it scrolls and never reflows. The bar only shows once the popup really is cut
+     short (html.scrolls), not for the moment it takes the window to grow to new content. */
+  html { overflow-y: auto; scrollbar-gutter: stable; }
+  body { overflow-y: visible; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+  html.scrolls ::-webkit-scrollbar-thumb { background: var(--tile-line); }
+  html.scrolls ::-webkit-scrollbar-thumb:hover { background: var(--track); }
   svg { display: block; flex-shrink: 0; }
   [hidden] { display: none !important; }  /* .row and .switch set display, which would otherwise win */
   button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
@@ -49,10 +63,10 @@
   :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
   /* Two views share one spot; the window fits whichever is showing */
-  .views { display: grid; position: relative; }
+  .views { display: grid; position: relative; overflow: clip; }  /* the hidden view mustn't make the page scroll */
   .view {
     grid-area: 1 / 1;
-    display: flex; flex-direction: column; gap: 10px; padding: 12px;
+    display: flex; flex-direction: column; gap: 10px; padding: 12px 6px 12px 12px;  /* + 6px scrollbar room on the right = 12px */
     transition: opacity 180ms var(--ease-out), transform 240ms var(--ease-out), visibility 0s;
   }
   .view[inert] { position: absolute; inset: 0 0 auto 0; opacity: 0; visibility: hidden; transition: opacity 120ms var(--ease-out), transform 240ms var(--ease-out), visibility 0s 240ms; }
@@ -93,7 +107,7 @@
     border-color: color-mix(in srgb, var(--brand) 30%, var(--line));
   }
   .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-  .card-title { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; line-height: 1.3; }
+  .card-title { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; line-height: 1.3; white-space: nowrap; flex-shrink: 0; }
   .mark { width: 15px; height: 15px; color: var(--brand, var(--muted)); }
   .card-plan {
     margin-left: auto; color: var(--muted); font-size: 13px;
@@ -112,14 +126,15 @@
   /* Where usage would be at an even pace through the window */
   .meter-pace {
     position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px;
-    background: var(--muted); transition: left 500ms var(--ease-out);
+    background: var(--muted); transition: left 300ms var(--ease-out);
   }
+  .meter-pace::before { content: ''; position: absolute; inset: -4px -6px; }  /* easier to hover for its tip */
   .meter-reset .runout { color: inherit; }
   .meter.warn .meter-reset .runout { color: var(--warn); }
   .meter.high .meter-reset .runout { color: var(--high); }
   .meter-fill {
     height: 100%; border-radius: 3px; background: var(--ink);
-    transition: width 500ms var(--ease-out), background-color 200ms var(--ease-out);
+    transition: width 300ms var(--ease-out), background-color 200ms var(--ease-out);
   }
   .meter-fill.warn { background: var(--warn); }
   .meter-fill.high { background: var(--high); }
@@ -130,7 +145,7 @@
   }
   .meter.high .meter-reset { color: var(--ink); }
 
-  .card.is-stale .meters { opacity: .45; }
+  .card.is-stale .meters { opacity: .7; }  /* still readable: these are the best numbers there are */
 
   .note {
     margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
@@ -217,6 +232,19 @@
   .text-btn:active { transform: scale(.96); }
   .version { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
+  /* Hover tips, drawn by the popup itself rather than Windows */
+  .tip {
+    position: fixed; top: 0; left: 0; z-index: 10; max-width: 240px; pointer-events: none;
+    padding: 5px 9px; border-radius: 8px;
+    background: var(--tip); border: 1px solid var(--tip-line); color: var(--ink); white-space: nowrap;
+    font-size: 12px; font-weight: 600; line-height: 1.35;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .45);
+    opacity: 0; transform: scale(.97);
+    transition: opacity 125ms var(--ease-out), transform 125ms var(--ease-out);
+  }
+  .tip.show { opacity: 1; transform: none; }
+  .tip.instant { transition: none; }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition-duration: 0s !important; animation-duration: 0s !important; transition-delay: 0s !important; }
   }
@@ -227,13 +255,13 @@
   <section class="view" id="view-main" aria-label="Usage">
     <div class="header">
       <div class="title">AI Tray</div>
-      <button class="icon-btn" id="refreshBtn" title="Refresh" aria-label="Refresh">
+      <button class="icon-btn" id="refreshBtn" data-tip="Refresh" aria-label="Refresh">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.168 8A10.003 10.003 0 0 0 12 2C6.815 2 2.551 5.947 2.05 11"/><path d="M17 8h4.4a.6.6 0 0 0 .6-.6V3"/><path d="M2.881 16c1.544 3.532 5.068 6 9.168 6 5.186 0 9.45-3.947 9.951-9"/><path d="M7.05 16H2.65a.6.6 0 0 0-.6.6V21"/></svg>
       </button>
-      <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
+      <button class="icon-btn" id="settingsBtn" data-tip="Settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="m19.622 10.395-1.097-2.65L20 6l-2-2-1.735 1.483-2.707-1.113L12.935 2h-1.954l-.632 2.401-2.645 1.115L6 4 4 6l1.453 1.789-1.08 2.657L2 11v2l2.401.655L5.516 16.3 4 18l2 2 1.791-1.46 2.606 1.072L11 22h2l.604-2.387 2.651-1.098C16.697 18.831 18 20 18 20l2-2-1.484-1.75 1.098-2.652 2.386-.62V11l-2.378-.605Z"/></svg>
       </button>
-      <button class="icon-btn close" title="Close" aria-label="Close">
+      <button class="icon-btn close" data-tip="Close" aria-label="Close">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.758 17.243 12.001 12m5.243-5.243L12.001 12m0 0L6.758 6.757M12.001 12l5.243 5.243"/></svg>
       </button>
     </div>
@@ -250,11 +278,11 @@
 
   <section class="view" id="view-settings" aria-label="Settings" inert>
     <div class="header">
-      <button class="icon-btn back" id="backBtn" title="Back" aria-label="Back">
+      <button class="icon-btn back" id="backBtn" data-tip="Back" aria-label="Back">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
       </button>
       <div class="title">Settings</div>
-      <button class="icon-btn close" title="Close" aria-label="Close">
+      <button class="icon-btn close" data-tip="Close" aria-label="Close">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.758 17.243 12.001 12m5.243-5.243L12.001 12m0 0L6.758 6.757M12.001 12l5.243 5.243"/></svg>
       </button>
     </div>
@@ -267,7 +295,7 @@
           <div class="row-name">Claude API</div>
           <div class="row-text" id="apiStatus">Paste an admin key</div>
         </div>
-        <label class="switch" id="apiToggle" hidden><input type="checkbox" data-toggle="api" aria-label="Show Claude API"><i></i></label>
+        <label class="switch" id="apiToggle" data-tip="Show in AI Tray" hidden><input type="checkbox" data-toggle="api" aria-label="Show Claude API"><i></i></label>
       </div>
       <form class="row" id="apiKeyForm">
         <input class="field" id="apiKeyInput" type="password" placeholder="sk-ant-admin01-…" aria-label="Admin key" autocomplete="off" spellcheck="false">
@@ -290,7 +318,7 @@
     <div class="list" id="startupList" hidden>
       <div class="row">
         <div class="row-main"><div class="row-name">Open at startup</div></div>
-        <label class="switch" title="Open AI Tray when Windows starts"><input type="checkbox" id="toggle-startup" aria-label="Open at startup"><i></i></label>
+        <label class="switch" data-tip="Open AI Tray when Windows starts"><input type="checkbox" id="toggle-startup" aria-label="Open at startup"><i></i></label>
       </div>
     </div>
 
@@ -352,7 +380,21 @@
     const m = Math.floor((diff % 3600000) / 60000);
     if (h >= 24) return `resets in ${Math.floor(h / 24)}d ${h % 24}h`;
     if (h > 0) return `resets in ${h}h ${m}m`;
+    if (m < 1) return 'resets in under a minute';
     return `resets in ${m}m`;
+  }
+
+  // "$12,345.67" in the currency Anthropic reports (dollars if it doesn't say or sends something odd)
+  function money(amount, currency, digits = 2) {
+    const opts = { style: 'currency', minimumFractionDigits: digits, maximumFractionDigits: digits };
+    try { return new Intl.NumberFormat('en-US', { ...opts, currency: currency || 'USD' }).format(amount); }
+    catch (e) { return new Intl.NumberFormat('en-US', { ...opts, currency: 'USD' }).format(amount); }
+  }
+
+  // A usage number as a whole percent from 0 to 100 (0 if a service didn't send one)
+  function percent(value) {
+    const n = Number(value);
+    return isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0;
   }
 
   function resetClock(isoDate) {
@@ -371,9 +413,11 @@
     const raw = String(pu.error || pu.staleError || '');
     if (pu.needsLogin) return `Signed out of ${def.name}.`;
     if (/No Claude OAuth token/i.test(raw)) return 'Claude Code isn’t signed in on this PC.';
-    if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|dns|network|offline|fetch failed/i.test(raw)) return `Can’t reach ${def.name}. Check your connection.`;
+    if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|UND_ERR_(?!\w*TIMEOUT)|socket hang up|dns|network|offline|fetch failed/i.test(raw)) return `Can’t reach ${def.name}. Check your connection.`;
     if (/timeout|timed out|aborted/i.test(raw)) return `${def.name} didn’t answer in time.`;
     if (/rate limit|429/i.test(raw)) return `${def.name} asked us to slow down. Trying again in a few minutes.`;
+    // "Claude API returned 529", "Anthropic returned 500.": a problem on their side, not something to fix here
+    if (/returned (5\d\d|an error)/i.test(raw)) return `${def.name} is having problems right now. Trying again soon.`;
     return raw || 'Something went wrong.';
   }
 
@@ -399,10 +443,10 @@
   }
 
   function renderMeter(m) {
-    const pct = Math.max(0, Math.min(100, Math.round(m.utilization)));
+    const pct = percent(m.utilization);
     const { lv, elapsed, runsOut } = pace(m, pct);
     // The tick only appears once a window is under way (ChatGPT's don't start until first use)
-    const marker = elapsed > 0.02 && elapsed < 1 ? `<i class="meter-pace" style="left:${(elapsed * 100).toFixed(1)}%" title="Even pace"></i>` : '';
+    const marker = elapsed > 0.02 && elapsed < 1 ? `<i class="meter-pace" style="left:${(elapsed * 100).toFixed(1)}%" data-tip="Even pace"></i>` : '';
     const right = runsOut ? `<span class="runout">runs out ${resetClock(runsOut)}</span>` : `<span>${resetClock(m.resets_at)}</span>`;
     return `
       <div class="meter ${lv}" data-key="${escapeHtml(m.label)}">
@@ -421,10 +465,10 @@
     if (cu.weekly) out.meters.push({ label: 'Weekly', utilization: cu.weekly.utilization, resets_at: cu.weekly.resets_at, minutes: 7 * 24 * 60 });
     if (cu.extraUsage && cu.extraUsage.is_enabled) {
       const eu = cu.extraUsage;
-      out.meters.push({ label: 'Extra usage', valueText: `$${(eu.used_credits / 100).toFixed(2)} of $${(eu.monthly_limit / 100).toFixed(0)}`, utilization: eu.utilization, resets_at: null });
+      out.meters.push({ label: 'Extra usage', valueText: `${money(eu.used_credits / 100, eu.currency)} of ${money(eu.monthly_limit / 100, eu.currency, 0)}`, utilization: eu.utilization, resets_at: null });
     }
-    if (cu.error && /401|token|OAuth|expired/i.test(cu.error) && !/No Claude OAuth token/i.test(cu.error)) out.needsLogin = true;
-    if (cu.staleError && /401|token|OAuth|expired/i.test(cu.staleError)) out.needsLogin = true;
+    if (cu.error && /401|OAuth|token expired/i.test(cu.error) && !/No Claude OAuth token/i.test(cu.error)) out.needsLogin = true;
+    if (cu.staleError && /401|OAuth|token expired/i.test(cu.staleError)) out.needsLogin = true;
     return out;
   }
 
@@ -438,6 +482,8 @@
 
     if (!pu) {
       body = '<div><div class="skeleton"></div><div class="skeleton" style="width:70%"></div></div>';
+    } else if (pu.error && /No usage data yet/i.test(pu.error)) {
+      note = '<div class="note">No usage data yet.</div>';  // ChatGPT before its first use: nothing is wrong
     } else if (pu.error) {
       const tone = /rate limit|429/i.test(pu.error) ? 'warn' : 'error';  // a slow-down isn't something to fix
       note = `<div class="note ${tone}">${escapeHtml(friendlyError(def, pu))}</div>`;
@@ -447,7 +493,7 @@
       body = (pu.meters || []).map(renderMeter).join('') || '<div class="note">No usage data yet.</div>';
       if (pu.staleError) {
         stale = true;
-        note = `<div class="note warn"><b>From ${fmtTime(pu.staleSince)}.</b> ${escapeHtml(friendlyError(def, { staleError: pu.staleError, needsLogin: pu.needsLogin }))}</div>`;
+        note = `<div class="note warn"><b>From ${resetClock(pu.staleSince)}.</b> ${escapeHtml(friendlyError(def, { staleError: pu.staleError, needsLogin: pu.needsLogin }))}</div>`;
         if (pu.needsLogin) note += `<div class="action-row">${signInButton(def.id)}</div>`;
       }
       // Claude API spend runs hours behind, so say how current it is
@@ -458,7 +504,7 @@
       <div class="card${stale ? ' is-stale' : ''}" data-key="${def.id}" style="--brand:${def.brand}">
         <div class="card-head">
           <span class="card-title">${markSvg(def)}${def.title}</span>
-          ${head ? `<span class="card-plan">${escapeHtml(head)}</span>` : ''}
+          ${head ? `<span class="card-plan" data-tip-overflow>${escapeHtml(head)}</span>` : ''}
         </div>
         ${body ? `<div class="meters">${body}</div>` : ''}
         ${note}
@@ -519,6 +565,7 @@
     }
     patch(document.getElementById('cards'), html.join(''));
     hasRendered = true;
+    if (tipFor && !tipFor.isConnected) hideTip();  // the element under the tip was replaced
 
     if (!refreshing) setStatus('');
     document.getElementById('refreshTime').textContent = data.refreshedAt ? `Updated ${fmtTime(data.refreshedAt)}` : '';
@@ -534,10 +581,10 @@
       <div class="row" data-key="${id}">
         <div class="row-main">
           <div class="row-name">${name}</div>
-          <div class="row-text${cls ? ' ' + cls : ''}" title="${escapeHtml(text)}">${escapeHtml(text)}</div>
+          <div class="row-text${cls ? ' ' + cls : ''}" data-tip-overflow>${escapeHtml(text)}</div>
         </div>
         ${login ? signInButton(id, true) : ''}
-        ${toggle ? `<label class="switch" title="Show in AI Tray"><input type="checkbox" data-toggle="${id}" aria-label="Show ${name}"${checked ? ' checked' : ''}><i></i></label>` : ''}
+        ${toggle ? `<label class="switch" data-tip="Show in AI Tray"><input type="checkbox" data-toggle="${id}" aria-label="Show ${name}"${checked ? ' checked' : ''}><i></i></label>` : ''}
       </div>`;
   }
 
@@ -562,6 +609,7 @@
       else if (!pu) rows.push(serviceRow(id, def.title, 'Checking…', '', { toggle: true }));
       else if (pu.needsLogin) rows.push(serviceRow(id, def.title, 'Signed out', 'bad', { toggle: true, login: true }));
       else if (pu.error && /rate limit|429/i.test(pu.error)) rows.push(serviceRow(id, def.title, 'Busy, trying again soon', 'stale', { toggle: true }));
+      else if (pu.error && /No usage data yet/i.test(pu.error)) rows.push(serviceRow(id, def.title, pu.plan ? `Connected · ${pu.plan}` : 'Connected', '', { toggle: true }));
       else if (pu.error) rows.push(serviceRow(id, def.title, 'Can’t connect right now', 'bad', { toggle: true }));
       else if (pu.staleError && /rate limit|429/i.test(pu.staleError)) rows.push(serviceRow(id, def.title, 'Busy, trying again soon', 'stale', { toggle: true }));
       else if (pu.staleError) rows.push(serviceRow(id, def.title, 'Connected, last update failed', 'stale', { toggle: true }));
@@ -620,6 +668,7 @@
     const settings = document.getElementById('view-settings');
     main.inert = next !== 'main';
     settings.inert = next !== 'settings';
+    window.scrollTo(0, 0);  // only matters on a screen too short for everything
     view = next;
     reportHeight();
     if (instant) { void views.offsetWidth; views.classList.remove('instant'); }
@@ -631,7 +680,14 @@
   // Tell the main process how tall the content is so the window can fit it
   function reportHeight() {
     requestAnimationFrame(() => window.ai.setHeight(Math.ceil(document.querySelector('.views').getBoundingClientRect().height)));
+    clearTimeout(reportHeight.check);
+    reportHeight.check = setTimeout(checkScrolls, 300);  // after the window has had time to resize
   }
+  function checkScrolls() {
+    const root = document.documentElement;
+    root.classList.toggle('scrolls', root.scrollHeight > root.clientHeight + 1);
+  }
+  window.addEventListener('resize', () => { clearTimeout(reportHeight.check); reportHeight.check = setTimeout(checkScrolls, 300); });
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(reportHeight);
 
   function setStatus(text, busy) {
@@ -700,12 +756,16 @@
     await window.ai.saveConfig(config);
   });
   document.getElementById('apiBudget').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+  // A number field changes when the mouse wheel turns over it while it's focused: let the wheel scroll instead
+  document.getElementById('apiBudget').addEventListener('wheel', (e) => { if (document.activeElement === e.target) e.target.blur(); }, { passive: true });
 
   // Two clicks to remove: the key is shown only once in the Console, so it can't be brought back
-  let removeArmed = null;
+  let removeArmed = null, removeArmedAt = 0;
   document.getElementById('apiKeyRemove').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
+    if (removeArmed && Date.now() - removeArmedAt < 500) return;  // a double-click isn't a second, deliberate click
     if (!removeArmed) {
+      removeArmedAt = Date.now();
       btn.textContent = 'Click again to remove';
       btn.classList.add('danger');
       removeArmed = setTimeout(() => { removeArmed = null; btn.textContent = 'Remove'; btn.classList.remove('danger'); }, 4000);
@@ -745,12 +805,67 @@
     }
   });
 
+  // ---------- Hover tips
+  // Drawn in the popup instead of Windows' grey tooltips. The first waits a moment so passing the
+  // mouse over doesn't flash one; moving on to the next one shows it straight away.
+  // [data-tip] always has a tip; [data-tip-overflow] shows its own text only when it's cut off.
+
+  const tip = document.createElement('div');
+  tip.className = 'tip';
+  tip.setAttribute('aria-hidden', 'true');  // the buttons carry aria-labels already
+  document.body.appendChild(tip);
+  let tipFor = null, tipTimer = null, tipWarmUntil = 0;
+
+  function tipText(el) {
+    if (el.dataset.tip) return el.dataset.tip;
+    return el.scrollWidth > el.clientWidth ? el.textContent : '';
+  }
+
+  function showTip(el, instant) {
+    if (!el.isConnected || el.closest('[inert]')) return;
+    tip.textContent = tipText(el);
+    tip.classList.toggle('instant', instant);
+    tip.style.left = '0px';  // measure at full width, before the scale-in
+    const r = el.getBoundingClientRect(), t = { width: tip.offsetWidth, height: tip.offsetHeight };
+    const area = document.querySelector('.views').getBoundingClientRect();  // inside the scrollbar's room
+    const left = Math.round(Math.min(Math.max(r.left + r.width / 2 - t.width / 2, area.left + 6), area.right - t.width - 6));
+    let top = r.top - t.height - 6;  // above, unless there's no room (the header buttons)
+    const below = top < 4;
+    if (below) top = Math.min(r.bottom + 6, window.innerHeight - t.height - 4);
+    tip.style.left = left + 'px';
+    tip.style.top = Math.round(top) + 'px';
+    tip.style.transformOrigin = `${Math.round(r.left + r.width / 2 - left)}px ${below ? '0' : '100%'}`;
+    tip.classList.add('show');
+  }
+
+  function hideTip() {
+    clearTimeout(tipTimer);
+    if (tip.classList.contains('show')) tipWarmUntil = Date.now() + 400;
+    tip.classList.remove('show');
+    tipFor = null;
+  }
+
+  document.addEventListener('mouseover', (e) => {
+    const el = e.target.closest('[data-tip], [data-tip-overflow]');
+    if (el === tipFor) return;
+    const warm = tip.classList.contains('show') || Date.now() < tipWarmUntil;
+    hideTip();
+    if (!el || !tipText(el)) return;
+    tipFor = el;
+    tipTimer = setTimeout(() => showTip(el, warm), warm ? 0 : 500);
+  });
+  document.documentElement.addEventListener('mouseleave', hideTip);
+  document.addEventListener('mousedown', hideTip, true);
+  document.addEventListener('keydown', hideTip, true);
+  document.addEventListener('scroll', hideTip, true);
+  window.addEventListener('blur', hideTip);
+
   // ---------- Start
 
   // Keep "resets in" countdowns current while the popup is open
   setInterval(() => { if (lastRendered) renderData(lastRendered); }, 60000);
 
-  window.ai.onShowView(({ view: v, instant }) => showView(v, { instant }));
+  window.ai.onShowView(({ view: v, instant }) => showView(v, { instant }));  // showView also scrolls back to the top
   window.ai.onDataUpdate((data) => renderData(data));
 
   (async () => {
